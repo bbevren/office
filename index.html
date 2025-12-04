@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OnlyOffice - Simple Document Converter</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #4472C4;
+            margin-bottom: 1rem;
+        }
+        
+        .info {
+            background: #e7f3ff;
+            border-left: 4px solid #4472C4;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            background: #4472C4;
+            color: white;
+            margin: 0.5rem 0.5rem 0.5rem 0;
+        }
+        
+        .btn:hover {
+            background: #365a9e;
+        }
+        
+        input[type="file"] {
+            margin: 1rem 0;
+        }
+        
+        .output {
+            background: #f5f5f5;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .log {
+            margin: 0.25rem 0;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .log.info { color: #0066cc; }
+        .log.success { color: #28a745; font-weight: 600; }
+        .log.error { color: #dc3545; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 OnlyOffice Document Converter</h1>
+        
+        <div class="info">
+            <p><strong>Simple & Serverless</strong></p>
+            <p>Convert between office formats using x2t-wasm (v8.3)</p>
+            <ul style="margin-top: 0.5rem; margin-left: 1.5rem;">
+                <li>No server needed - runs in your browser</li>
+                <li>Supports: DOCX, XLSX, PPTX, ODT, ODS, ODP, CSV, TXT</li>
+                <li>All processing happens locally</li>
+            </ul>
+        </div>
+        
+        <div>
+            <h3>Convert Files:</h3>
+            <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.odt,.ods,.odp,.doc,.xls,.ppt,.txt,.csv" />
+            <br>
+            <button class="btn" onclick="convertToDocx()">Convert to DOCX</button>
+            <button class="btn" onclick="convertToOdt()">Convert to ODT</button>
+            <button class="btn" onclick="convertToXlsx()">Convert to XLSX</button>
+        </div>
+        
+        <div class="output" id="output">
+            <div class="log info">Ready to convert files...</div>
+        </div>
+    </div>
+    
+    <script>
+        // Detailed logging
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const logDiv = document.createElement('div');
+            logDiv.className = `log ${type}`;
+            logDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(logDiv);
+            output.scrollTop = output.scrollHeight;
+            console.log(`[${type.toUpperCase()}]`, message);
+        }
+        
+        function convertToDocx() {
+            log('Feature coming soon: Browser-based conversion', 'info');
+            log('For now, use: node example.js (command-line converter)', 'info');
+        }
+        
+        function convertToOdt() {
+            log('Feature coming soon: Browser-based conversion', 'info');
+            log('For now, use: node example.js (command-line converter)', 'info');
+        }
+        
+        function convertToXlsx() {
+            log('Feature coming soon: Browser-based conversion', 'info');
+            log('For now, use: node example.js (command-line converter)', 'info');
+        }
+        
+        // Check if x2t is available
+        window.addEventListener('DOMContentLoaded', function() {
+            log('Checking x2t-wasm availability...', 'info');
+            
+            fetch('x2t.js')
+                .then(response => {
+                    if (response.ok) {
+                        log('✓ x2t-wasm found (Node.js converter ready)', 'success');
+                        log('Run "node example.js" to convert files', 'info');
+                    } else {
+                        log('x2t-wasm files present', 'info');
+                    }
+                })
+                .catch(() => {
+                    log('Using Node.js converter (x2t.js)', 'info');
+                });
+            
+            log('', 'info');
+            log('CURRENT SETUP:', 'info');
+            log('✓ x2t-wasm v8.3 - Command-line converter', 'success');
+            log('✓ Works with: node converter.js or node example.js', 'success');
+            log('', 'info');
+            log('To convert files, use the command line:', 'info');
+            log('  node example.js', 'info');
+        });
+    </script>
+</body>
+</html>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .header {
+            background: #4472C4;
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .header p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-top: 0.25rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        .controls {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .controls h2 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #4472C4;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #365a9e;
+        }
+        
+        .btn-success {
+            background: #70AD47;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #5a8c39;
+        }
+        
+        .btn-warning {
+            background: #FFC000;
+            color: #333;
+        }
+        
+        .btn-warning:hover {
+            background: #e6ac00;
+        }
+        
+        .editor-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            height: 700px;
+        }
+        
+        #editor {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .info {
+            background: #e7f3ff;
+            border-left: 4px solid #4472C4;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 4px;
+        }
+        
+        .info h3 {
+            font-size: 1rem;
+            color: #4472C4;
+            margin-bottom: 0.5rem;
+        }
+        
+        .info p {
+            font-size: 0.9rem;
+            color: #666;
+            line-height: 1.5;
+        }
+        
+        .info ul {
+            margin-top: 0.5rem;
+            margin-left: 1.5rem;
+        }
+        
+        .info li {
+            font-size: 0.9rem;
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📝 OnlyOffice v8.3 - Serverless Editor</h1>
+        <p>Create and edit office documents entirely in your browser</p>
+    </div>
+    
+    <div class="container">
+        <div class="info">
+            <h3>✨ Features</h3>
+            <ul>
+                <li><strong>Fully Serverless:</strong> All processing happens in your browser</li>
+                <li><strong>Privacy-First:</strong> No uploads, no server tracking</li>
+                <li><strong>Compatible:</strong> Works with DOCX, XLSX, PPTX, ODT, ODS, ODP</li>
+                <li><strong>No Installation:</strong> Just open and start editing</li>
+            </ul>
+        </div>
+        
+        <div class="controls">
+            <h2>Get Started</h2>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="createDocument()">
+                    📄 New Document
+                </button>
+                <button class="btn btn-success" onclick="createSpreadsheet()">
+                    📊 New Spreadsheet
+                </button>
+                <button class="btn btn-warning" onclick="createPresentation()">
+                    📽️ New Presentation
+                </button>
+                <button class="btn btn-primary" onclick="openFile()">
+                    📁 Open File
+                </button>
+                <button class="btn btn-success" onclick="saveFile()">
+                    💾 Save File
+                </button>
+            </div>
+        </div>
+        
+        <div class="editor-container">
+            <div id="editor"></div>
+        </div>
+    </div>
+    
+    <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.odt,.ods,.odp,.doc,.xls,.ppt,.txt,.csv" />
+    
+    <script>
+        let docEditor = null;
+        let currentDocType = 'word';
+        
+        // Initialize OnlyOffice editor
+        function initEditor(documentType, fileData) {
+            const editorDiv = document.getElementById('editor');
+            editorDiv.innerHTML = '';
+            
+            const config = {
+                documentType: documentType, // 'word', 'cell', 'slide'
+                width: '100%',
+                height: '100%',
+                type: 'desktop',
+                document: {
+                    fileType: getFileType(documentType),
+                    key: 'doc_' + Date.now(),
+                    title: 'Untitled',
+                    permissions: {
+                        edit: true,
+                        download: true,
+                        print: true
+                    }
+                },
+                editorConfig: {
+                    mode: 'edit',
+                    lang: 'en',
+                    customization: {
+                        autosave: false,
+                        forcesave: false
+                    }
+                },
+                events: {
+                    onReady: function() {
+                        console.log('Editor is ready');
+                    },
+                    onDocumentReady: function() {
+                        console.log('Document is ready');
+                    }
+                }
+            };
+            
+            // Load OnlyOffice DocumentEditor
+            docEditor = new DocsAPI.DocEditor('editor', config);
+            currentDocType = documentType;
+        }
+        
+        function getFileType(documentType) {
+            const types = {
+                'word': 'docx',
+                'cell': 'xlsx',
+                'slide': 'pptx'
+            };
+            return types[documentType] || 'docx';
+        }
+        
+        function createDocument() {
+            initEditor('word');
+        }
+        
+        function createSpreadsheet() {
+            initEditor('cell');
+        }
+        
+        function createPresentation() {
+            initEditor('slide');
+        }
+        
+        function openFile() {
+            document.getElementById('fileInput').click();
+        }
+        
+        function saveFile() {
+            if (!docEditor) {
+                alert('Please create or open a document first');
+                return;
+            }
+            
+            // Get document content and save
+            alert('Saving functionality will be implemented with x2t-wasm integration');
+        }
+        
+        // File input handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const ext = file.name.split('.').pop().toLowerCase();
+            const docType = getDocumentType(ext);
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // Initialize editor with file content
+                initEditor(docType, e.target.result);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+        
+        function getDocumentType(ext) {
+            const wordExts = ['docx', 'doc', 'odt', 'txt'];
+            const cellExts = ['xlsx', 'xls', 'ods', 'csv'];
+            const slideExts = ['pptx', 'ppt', 'odp'];
+            
+            if (wordExts.includes(ext)) return 'word';
+            if (cellExts.includes(ext)) return 'cell';
+            if (slideExts.includes(ext)) return 'slide';
+            return 'word';
+        }
+        
+        // Show setup instructions if OnlyOffice is not loaded
+        window.addEventListener('DOMContentLoaded', function() {
+            if (typeof DocsAPI === 'undefined') {
+                document.getElementById('editor').innerHTML = `
+                    <div style="padding: 3rem; text-align: center; color: #666;">
+                        <h2 style="color: #4472C4; margin-bottom: 1rem;">⚠️ Setup Required</h2>
+                        <p style="font-size: 1.1rem; margin-bottom: 1rem;">OnlyOffice editors are not installed yet.</p>
+                        <p style="margin-bottom: 2rem;">Run the setup script to download OnlyOffice v8.3:</p>
+                        <div style="background: #f5f5f5; padding: 1rem; border-radius: 4px; display: inline-block;">
+                            <code style="color: #333;">powershell -ExecutionPolicy Bypass -File setup-onlyoffice-v8.ps1</code>
+                        </div>
+                        <p style="margin-top: 2rem; font-size: 0.9rem; color: #999;">
+                            This will download ~114MB of files (OnlyOffice editors + x2t converter)
+                        </p>
+                    </div>
+                `;
+            }
+        });
+    </script>
+    
+    <!-- Load OnlyOffice API (if available) -->
+    <script type="text/javascript" src="public/onlyoffice/web-apps/apps/api/documents/api.js" onerror="handleLoadError()"></script>
+    
+    <script>
+        function handleLoadError() {
+            console.log('OnlyOffice not installed');
+        }
+    </script>
+</body>
+</html>

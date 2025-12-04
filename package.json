@@ -1,0 +1,23 @@
+{
+  "name": "onlyoffice-serverless",
+  "version": "1.0.0",
+  "description": "OnlyOffice Document Server running serverless with x2t-wasm v8.3",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "convert": "node example.js"
+  },
+  "keywords": [
+    "onlyoffice",
+    "wasm",
+    "editor",
+    "converter",
+    "office",
+    "documents",
+    "serverless"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}
+

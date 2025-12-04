@@ -1,0 +1,11 @@
+Hello World!
+
+This is a sample document created with OnlyOffice x2t-wasm.
+
+Features:
+- Serverless conversion
+- No document server needed
+- Runs entirely in Node.js
+- Supports multiple formats
+
+Convert this to DOCX, ODT, or any other format!

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# OnlyOffice editors (large - download via setup script)
+public/onlyoffice/
+
+# x2t-wasm (large files - download separately)
+x2t.js
+x2t.wasm
+x2t.zip
+x2t.zip.sha512
+
+# OnlyOffice editor zip (large - download separately)
+onlyoffice-editor.zip
+
+# Compressed versions (optional)
+*.br
+
+# Output directories
+output/
+samples/*.docx
+samples/*.xlsx
+samples/*.pptx
+samples/*.odt
+samples/*.ods
+samples/*.odp
+
+# Temporary files
+*.bin
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

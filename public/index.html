@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serverless Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+        .header .info {
+            font-size: 12px;
+            color: #666;
+        }
+        .toolbar {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 10px 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .toolbar button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .toolbar button:hover {
+            background: #f8f8f8;
+            border-color: #4a90e2;
+        }
+        .toolbar button.primary {
+            background: #4a90e2;
+            color: white;
+            border-color: #4a90e2;
+        }
+        .toolbar button.primary:hover {
+            background: #357abd;
+        }
+        .toolbar input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 200px;
+        }
+        .toolbar input[type="file"] {
+            display: none;
+        }
+        .editor-container {
+            flex: 1;
+            position: relative;
+            background: #fff;
+        }
+        #editor {
+            width: 100%;
+            height: 100%;
+        }
+        .status {
+            padding: 8px 20px;
+            background: #f9f9f9;
+            border-top: 1px solid #e0e0e0;
+            font-size: 12px;
+            color: #666;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+        .loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4a90e2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📄Serverless Editor</h1>
+        <div class="info">CryptPad Patched v8.3.3.23+5 | x2t-wasm v8.3</div>
+    </div>
+    
+    <div class="toolbar">
+        <button class="primary" onclick="createDocument('word')">📝 New Document</button>
+        <button class="primary" onclick="createDocument('cell')">📊 New Spreadsheet</button>
+        <button class="primary" onclick="createDocument('slide')">📽️ New Presentation</button>
+        <span style="margin: 0 10px; color: #ccc;">|</span>
+        <input type="text" id="filename" placeholder="Document name" value="Untitled">
+        <button onclick="document.getElementById('fileInput').click()">📂 Open</button>
+        <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.odt,.ods,.odp" onchange="openFile(event)">
+        <button onclick="downloadDocument()">💾 Download</button>
+    </div>
+    
+    <div class="editor-container">
+        <div id="editor">
+            <div class="loading" id="welcomeScreen">
+                <p style="font-size: 16px; color: #666;">Click a button above to create a new document</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="status">
+        <span id="status">Ready • Select a document type to begin</span>
+    </div>
+
+    <script src="/onlyoffice/v8/web-apps/apps/api/documents/api.js"></script>
+    <script>
+        // Register service worker to intercept download requests
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                .then(reg => {
+                    console.log('[SW] Service worker registered:', reg.scope);
+                })
+                .catch(err => {
+                    console.error('[SW] Registration failed:', err);
+                });
+            
+            // Listen for download notifications from service worker
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                console.log('[SW] Message from service worker:', event.data);
+                if (event.data.type === 'download-ready' && event.data.url) {
+                    console.log('[SW] Download ready, triggering download:', event.data.url);
+                    triggerFileDownload(event.data.url);
+                }
+            });
+        }
+        
+        // Template loading - CryptPad format templates loaded dynamically
+        // The templates are AMD modules that return functions (taking newOO param) that return template strings
+        const EmptyDocTemplates = {
+            word: null,
+            cell: null,
+            slide: null
+        };
+
+        // Simple AMD loader for our template modules
+        window.define = function(factory) {
+            window._lastAMDModule = factory();
+        };
+        window.define.amd = true;
+
+        // Intercept XHR to catch download responses from OnlyOffice SDK
+        // The SDK makes POST requests to /downloadas/* and expects to handle the response
+        // but the CryptPad patch doesn't properly trigger onDownloadAs callback
+        (function() {
+            const originalXHROpen = XMLHttpRequest.prototype.open;
+            const originalXHRSend = XMLHttpRequest.prototype.send;
+            
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this._downloadUrl = (method === 'POST' && url.includes('/downloadas/')) ? url : null;
+                return originalXHROpen.apply(this, arguments);
+            };
+            
+            XMLHttpRequest.prototype.send = function(body) {
+                if (this._downloadUrl) {
+                    const xhr = this;
+                    const originalOnReadyStateChange = xhr.onreadystatechange;
+                    
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState === 4 && xhr.status === 200) {
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                console.log('[XHR Intercept] Download response:', response);
+                                
+                                if (response.error === 0 && response.url) {
+                                    console.log('[XHR Intercept] Triggering download from:', response.url);
+                                    // Delay slightly to allow SDK to process first
+                                    setTimeout(() => {
+                                        triggerFileDownload(response.url);
+                                    }, 100);
+                                }
+                            } catch (e) {
+                                console.log('[XHR Intercept] Not JSON response');
+                            }
+                        }
+                        if (originalOnReadyStateChange) {
+                            originalOnReadyStateChange.apply(this, arguments);
+                        }
+                    };
+                }
+                return originalXHRSend.apply(this, arguments);
+            };
+            
+            console.log('[XHR Intercept] Download response interceptor installed');
+        })();
+
+        // Load templates from server
+        async function loadTemplates() {
+            console.log('[Templates] Loading CryptPad templates...');
+            
+            const templateConfig = [
+                { type: 'word', path: '/templates/oodoc_base.js' },
+                { type: 'cell', path: '/templates/oocell_base.js' },
+                { type: 'slide', path: '/templates/ooslide_base.js' }
+            ];
+
+            for (const config of templateConfig) {
+                try {
+                    // Load via script tag to execute AMD define
+                    await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = config.path;
+                        script.onload = () => {
+                            // After script loads, _lastAMDModule contains the factory result (a function)
+                            if (window._lastAMDModule) {
+                                // Call the function with newOO=true to get the newer format
+                                const templateFn = window._lastAMDModule;
+                                const template = templateFn(true);  // Use newOO=true format
+                                if (template) {
+                                    EmptyDocTemplates[config.type] = template;
+                                    console.log(`[Templates] Loaded ${config.type}: ${template.substring(0, 60)}... (${template.length} chars)`);
+                                } else {
+                                    // Try without newOO param
+                                    const templateOld = templateFn();
+                                    if (templateOld) {
+                                        EmptyDocTemplates[config.type] = templateOld;
+                                        console.log(`[Templates] Loaded ${config.type} (old): ${templateOld.substring(0, 60)}... (${templateOld.length} chars)`);
+                                    }
+                                }
+                                window._lastAMDModule = null;
+                            }
+                            resolve();
+                        };
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                } catch (err) {
+                    console.error(`[Templates] Failed to load ${config.type}:`, err);
+                }
+            }
+            
+            console.log('[Templates] Loaded:', {
+                word: EmptyDocTemplates.word ? EmptyDocTemplates.word.length + ' chars' : 'MISSING',
+                cell: EmptyDocTemplates.cell ? EmptyDocTemplates.cell.length + ' chars' : 'MISSING',
+                slide: EmptyDocTemplates.slide ? EmptyDocTemplates.slide.length + ' chars' : 'MISSING'
+            });
+        }
+
+        // Load templates on page load
+        loadTemplates();
+
+        let editor = null;
+        let currentType = null;
+        let currentDocUrl = null;
+        let currentDocBlob = null;  // Store the document blob for mock server
+        let documentContent = null;
+        let documentChanges = [];  // Store all changes for export
+        let templatesLoaded = false;
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+            console.log('[Status]', message);
+        }
+
+        // Inject XHR interceptor into iframe to catch download responses
+        function injectDownloadInterceptor(win) {
+            try {
+                const originalXHROpen = win.XMLHttpRequest.prototype.open;
+                const originalXHRSend = win.XMLHttpRequest.prototype.send;
+                
+                win.XMLHttpRequest.prototype.open = function(method, url) {
+                    this._isDownload = (method === 'POST' && url.includes('/downloadas/'));
+                    return originalXHROpen.apply(this, arguments);
+                };
+                
+                win.XMLHttpRequest.prototype.send = function(body) {
+                    if (this._isDownload) {
+                        const xhr = this;
+                        const originalHandler = xhr.onreadystatechange;
+                        
+                        xhr.onreadystatechange = function() {
+                            if (xhr.readyState === 4 && xhr.status === 200) {
+                                try {
+                                    const response = JSON.parse(xhr.responseText);
+                                    console.log('[Iframe XHR] Download response:', response);
+                                    
+                                    if (response.error === 0 && response.url) {
+                                        console.log('[Iframe XHR] Triggering download:', response.url);
+                                        // Use parent window's download function
+                                        window.triggerFileDownload(response.url);
+                                    }
+                                } catch (e) {
+                                    // Not JSON, ignore
+                                }
+                            }
+                            if (originalHandler) {
+                                originalHandler.apply(this, arguments);
+                            }
+                        };
+                    }
+                    return originalXHRSend.apply(this, arguments);
+                };
+                
+                console.log('[Iframe XHR] Interceptor installed in iframe');
+            } catch (e) {
+                console.error('[Iframe XHR] Failed to install interceptor:', e);
+            }
+        }
+
+        // Trigger file download from a URL
+        async function triggerFileDownload(url) {
+            try {
+                updateStatus('Downloading file...');
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const blob = await response.blob();
+                
+                // Extract filename from URL
+                const urlPath = new URL(url).pathname;
+                const filename = urlPath.split('/').pop() || 'download';
+                
+                // Create download link and trigger it
+                const downloadUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(downloadUrl);
+                
+                updateStatus(`Downloaded: ${filename}`);
+                console.log('[Download] Successfully downloaded:', filename, blob.size, 'bytes');
+            } catch (err) {
+                console.error('[Download] Failed to fetch file:', err);
+                updateStatus(`Download failed: ${err.message}`);
+            }
+        }
+
+        // Wait for templates to be loaded
+        async function waitForTemplates() {
+            if (templatesLoaded) return true;
+            
+            // Wait up to 5 seconds for templates
+            for (let i = 0; i < 50; i++) {
+                if (EmptyDocTemplates.word && EmptyDocTemplates.cell && EmptyDocTemplates.slide) {
+                    templatesLoaded = true;
+                    return true;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return false;
+        }
+
+        // Create document blob from template - as PLAIN TEXT (not decoded)
+        // This matches how CryptPad does it in loadInitDocument()
+        function createDocumentBlob(type) {
+            const template = EmptyDocTemplates[type];
+            if (!template) {
+                console.error('No template for type:', type);
+                return null;
+            }
+            console.log(`[Template] Creating ${type} blob with ${template.length} chars`);
+            console.log(`[Template] Header: ${template.substring(0, 60)}`);
+            // The template is used as-is as plain text, NOT base64 decoded
+            // OnlyOffice expects this format: TYPE;version;size;base64data
+            return new Blob([template], { type: 'text/plain' });
+        }
+
+        async function createDocument(type) {
+            currentType = type;
+            const filename = document.getElementById('filename').value || 'Untitled';
+            
+            // Clear previous editor
+            if (editor) {
+                if (currentDocUrl) {
+                    URL.revokeObjectURL(currentDocUrl);
+                }
+                document.getElementById('editor').innerHTML = '';
+                editor = null;
+            }
+
+            // Show loading
+            document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading editor...</p></div>';
+            updateStatus(`Creating ${type} document...`);
+
+            // Wait for templates to be loaded
+            updateStatus(`Loading templates...`);
+            const loaded = await waitForTemplates();
+            if (!loaded) {
+                updateStatus('Error: Templates failed to load');
+                document.getElementById('editor').innerHTML = '<div class="loading"><p style="color: red;">Error: Failed to load document templates</p></div>';
+                return;
+            }
+
+            // Create document blob (plain text, not decoded)
+            const blob = createDocumentBlob(type);
+            if (!blob) {
+                updateStatus('Error: Failed to create document');
+                return;
+            }
+            // Store the blob for the mock server to provide
+            currentDocBlob = blob;
+            currentDocUrl = URL.createObjectURL(blob);
+
+            console.log('[Editor] Document blob URL:', currentDocUrl);
+            console.log('[Editor] Blob size:', blob.size, 'bytes');
+
+            // Map to file extensions and internal OO types
+            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
+            const ooTypeMap = { word: 'doc', cell: 'sheet', slide: 'presentation' };
+            const fileType = extMap[type] || 'docx';
+            const ooType = ooTypeMap[type] || 'doc';
+
+            // For CryptPad patched version, we DON'T pass a document URL
+            // The mock server provides the initial content via getInitialChanges
+            const config = {
+                documentType: type === 'cell' ? 'spreadsheet' : type === 'slide' ? 'presentation' : 'text',
+                document: {
+                    fileType: fileType,
+                    key: 'doc_' + Date.now().toString(),
+                    title: `${filename}.${fileType}`,
+                    // NO URL - content comes from mock server
+                    url: currentDocUrl,  // Still needed for the editor to reference
+                    permissions: {
+                        edit: true,
+                        download: true,
+                        print: true,
+                        review: false,
+                        comment: false
+                    }
+                },
+                editorConfig: {
+                    mode: 'edit',
+                    lang: 'en',
+                    user: {
+                        id: 'user_' + Math.random().toString(36).substr(2, 9),
+                        name: 'Guest'
+                    },
+                    customization: {
+                        autosave: false,
+                        forcesave: false,
+                        chat: false,
+                        comments: false,
+                        compactHeader: true,
+                        compactToolbar: false,
+                        help: false,
+                        hideRightMenu: false,
+                        about: false,
+                        feedback: false
+                    }
+                },
+                events: {
+                    onAppReady: function() {
+                        console.log('[Editor] App ready');
+                        updateStatus('Editor ready, loading document...');
+                        
+                        // Inject XHR interceptor into the editor iframe to catch download responses
+                        try {
+                            const iframe = document.querySelector('#editor iframe');
+                            if (iframe && iframe.contentWindow) {
+                                injectDownloadInterceptor(iframe.contentWindow);
+                            }
+                        } catch (e) {
+                            console.log('[Editor] Could not inject interceptor:', e.message);
+                        }
+                    },
+                    onDocumentReady: function() {
+                        console.log('[Editor] Document ready');
+                        updateStatus(`Ready • Editing ${filename}.${fileType}`);
+                    },
+                    onError: function(e) {
+                        console.error('[Editor] Error:', e);
+                        updateStatus(`Error: ${e.data || JSON.stringify(e)}`);
+                    },
+                    onWarning: function(e) {
+                        console.warn('[Editor] Warning:', e);
+                        // Check if this is actually a download response
+                        // The CryptPad patch sometimes sends download results as warnings
+                        if (e && e.data) {
+                            const data = e.data;
+                            // Check for download URL in warning data
+                            if (data.url || (typeof data === 'object' && data.data && data.data.url)) {
+                                const url = data.url || data.data.url;
+                                console.log('[Editor] Found download URL in warning:', url);
+                                triggerFileDownload(url);
+                            }
+                        }
+                    },
+                    onDownloadAs: function(e) {
+                        console.log('[Editor] Download as event:', e);
+                        // When server returns download URL, trigger actual download
+                        if (e && e.data) {
+                            let url = null;
+                            if (typeof e.data === 'string') {
+                                url = e.data;
+                            } else if (e.data.url) {
+                                url = e.data.url;
+                            }
+                            if (url) {
+                                console.log('[Editor] Triggering download from URL:', url);
+                                triggerFileDownload(url);
+                            }
+                        }
+                    }
+                },
+                type: 'desktop',
+                width: '100%',
+                height: '100%'
+            };
+
+            console.log('[Editor] Creating editor with config:', config);
+
+            try {
+                // Clear and create editor
+                document.getElementById('editor').innerHTML = '';
+                editor = new DocsAPI.DocEditor('editor', config);
+                
+                // Connect mock server for CryptPad patched version
+                if (editor.connectMockServer) {
+                    console.log('[Editor] Connecting mock server...');
+                    connectMockServer(editor, type, filename);
+                }
+            } catch (err) {
+                console.error('[Editor] Failed to create editor:', err);
+                updateStatus(`Failed to create editor: ${err.message}`);
+                document.getElementById('editor').innerHTML = `<div class="loading"><p style="color: red;">Error: ${err.message}</p></div>`;
+            }
+        }
+
+        // Mock server implementation for CryptPad patched OnlyOffice
+        // This simulates what would normally be a WebSocket connection to a document server
+        function connectMockServer(editorInstance, docType, filename) {
+            // Ensure window.APP exists (required by api.js)
+            window.APP = window.APP || {};
+            
+            // Store reference to send messages back to the editor
+            let sendToEditor = null;
+            
+            const mockServer = {
+                // Called when OnlyOffice sends a message (auth, save, etc.)
+                onMessage: function(msg) {
+                    console.log('[MockServer] Received message:', msg);
+                    
+                    // Handle different message types
+                    if (msg.type === 'saveChanges') {
+                        console.log('[MockServer] Save changes:', msg.changes?.length || 0, 'changes');
+                        documentContent = msg.changes;
+                        // Accumulate changes for export
+                        if (msg.changes && Array.isArray(msg.changes)) {
+                            documentChanges = documentChanges.concat(msg.changes);
+                        }
+                    } else if (msg.type === 'unSaveLock') {
+                        console.log('[MockServer] Unlock save');
+                    } else if (msg.type === 'getLock') {
+                        console.log('[MockServer] Get lock request');
+                        // Send lock confirmation
+                        if (sendToEditor) {
+                            sendToEditor({
+                                type: 'getLock',
+                                locks: {}
+                            });
+                        }
+                    } else if (msg.type === 'cursor') {
+                        // Cursor position updates - ignore in single-user mode
+                    } else if (msg.type === 'openDocument') {
+                        // Handle image URL requests when duplicating slides etc.
+                        console.log('[MockServer] Open document request:', msg);
+                        if (msg.message && msg.message.c === 'imgurls') {
+                            // Return empty image URLs
+                            if (sendToEditor) {
+                                sendToEditor({
+                                    type: 'documentOpen',
+                                    data: { "imgurls": {} }
+                                });
+                            }
+                        }
+                    }
+                },
+                
+                // Return list of participants (for collaborative editing)
+                getParticipants: function() {
+                    return {
+                        list: [{
+                            id: 'user_local',
+                            idOriginal: 'user_local', 
+                            username: 'Guest',
+                            indexUser: 0,
+                            view: false
+                        }],
+                        index: 0
+                    };
+                },
+                
+                // Called after auth completes
+                onAuth: function() {
+                    console.log('[MockServer] Auth completed');
+                    updateStatus(`Ready • Editing ${filename}`);
+                },
+                
+                // Get image URL - returns a Promise
+                getImageURL: function(name) {
+                    console.log('[MockServer] Get image URL:', name);
+                    // Return a promise that resolves to empty string (no images)
+                    return Promise.resolve('');
+                },
+                
+                // Return initial document changes (empty for new doc)
+                getInitialChanges: function() {
+                    console.log('[MockServer] Get initial changes');
+                    return [];
+                }
+            };
+
+            try {
+                // connectMockServer returns a function to send messages to the editor
+                sendToEditor = editorInstance.connectMockServer(mockServer);
+                console.log('[MockServer] Connected successfully, sendToEditor:', typeof sendToEditor);
+            } catch (err) {
+                console.error('[MockServer] Failed to connect:', err);
+            }
+        }
+
+        function openFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const ext = file.name.split('.').pop().toLowerCase();
+            const typeMap = {
+                'docx': 'word', 'doc': 'word', 'odt': 'word',
+                'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell',
+                'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
+            };
+
+            const docType = typeMap[ext];
+            if (!docType) {
+                alert('Unsupported file type: ' + ext);
+                return;
+            }
+
+            document.getElementById('filename').value = file.name.replace(/\.[^/.]+$/, '');
+
+            // Read file and create blob URL
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                if (currentDocUrl) {
+                    URL.revokeObjectURL(currentDocUrl);
+                }
+                const blob = new Blob([e.target.result], { type: 'application/octet-stream' });
+                currentDocUrl = URL.createObjectURL(blob);
+                currentType = docType;
+
+                // Create editor with loaded file
+                loadDocumentInEditor(docType, file.name, ext);
+            };
+            reader.readAsArrayBuffer(file);
+            
+            event.target.value = '';
+        }
+
+        function loadDocumentInEditor(type, filename, fileType) {
+            if (editor) {
+                document.getElementById('editor').innerHTML = '';
+                editor = null;
+            }
+
+            document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading document...</p></div>';
+            updateStatus(`Opening ${filename}...`);
+
+            const config = {
+                documentType: type,
+                document: {
+                    fileType: fileType,
+                    key: 'doc_' + Date.now().toString(),
+                    title: filename,
+                    url: currentDocUrl,
+                    permissions: {
+                        edit: true,
+                        download: true,
+                        print: true
+                    }
+                },
+                editorConfig: {
+                    mode: 'edit',
+                    lang: 'en',
+                    user: {
+                        id: 'user_' + Math.random().toString(36).substr(2, 9),
+                        name: 'Guest'
+                    },
+                    customization: {
+                        autosave: false,
+                        chat: false,
+                        comments: false,
+                        help: false,
+                        about: false,
+                        feedback: false
+                    }
+                },
+                events: {
+                    onDocumentReady: function() {
+                        updateStatus(`Ready • Editing ${filename}`);
+                    },
+                    onError: function(e) {
+                        console.error('[Editor] Error:', e);
+                        updateStatus(`Error loading document`);
+                    }
+                },
+                type: 'desktop',
+                width: '100%',
+                height: '100%'
+            };
+
+            try {
+                document.getElementById('editor').innerHTML = '';
+                editor = new DocsAPI.DocEditor('editor', config);
+                
+                if (editor.connectMockServer) {
+                    connectMockServer(editor, type, filename);
+                }
+            } catch (err) {
+                console.error('[Editor] Failed:', err);
+                updateStatus(`Failed to open document: ${err.message}`);
+            }
+        }
+
+        async function downloadDocument() {
+            if (!editor) {
+                alert('Please create or open a document first');
+                return;
+            }
+
+            const filename = document.getElementById('filename').value || 'Untitled';
+            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
+            const ext = extMap[currentType] || 'docx';
+
+            updateStatus(`Downloading ${filename}.${ext}...`);
+            
+            // Use the SDK's native downloadAs - it has access to the actual document content
+            try {
+                editor.downloadAs(`${filename}.${ext}`);
+                
+                // Poll for the download to be ready (since SDK doesn't call our callback)
+                pollForDownload();
+            } catch (err) {
+                console.error('[Download] SDK downloadAs failed:', err);
+                updateStatus('Download failed: ' + err.message);
+            }
+        }
+        
+        // Poll the server for completed downloads
+        async function pollForDownload() {
+            let attempts = 0;
+            const maxAttempts = 30; // 15 seconds max
+            
+            const poll = async () => {
+                try {
+                    const response = await fetch('/api/latest-download');
+                    const data = await response.json();
+                    
+                    if (data.url) {
+                        console.log('[Poll] Download ready:', data.url);
+                        triggerFileDownload(data.url);
+                        return;
+                    }
+                    
+                    attempts++;
+                    if (attempts < maxAttempts) {
+                        setTimeout(poll, 500);
+                    } else {
+                        updateStatus('Download timed out');
+                    }
+                } catch (err) {
+                    console.error('[Poll] Error:', err);
+                }
+            };
+            
+            // Start polling after a short delay to let server process
+            setTimeout(poll, 500);
+        }
+        
+        // Legacy download function - kept for reference but not used
+        async function downloadDocumentDirect() {
+            if (!editor) {
+                alert('Please create or open a document first');
+                return;
+            }
+
+            const filename = document.getElementById('filename').value || 'Untitled';
+            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
+            const ext = extMap[currentType] || 'docx';
+
+            updateStatus(`Downloading ${filename}.${ext}...`);
+            
+            // Get the current document content from the template + changes
+            // For CryptPad patched version, the document content is in internal format
+            const template = EmptyDocTemplates[currentType];
+            if (!template) {
+                alert('Cannot export: no template available');
+                return;
+            }
+            
+            try {
+                // Use our custom conversion endpoint
+                updateStatus(`Converting to ${ext}...`);
+                
+                // Build the document content - template + changes
+                const docContent = template;  // Full internal format doc
+                
+                // Create FormData with the document
+                const formData = new FormData();
+                const blob = new Blob([docContent], { type: 'text/plain' });
+                formData.append('file', blob, `${filename}.bin`);
+                formData.append('outputFormat', ext);
+                formData.append('title', `${filename}.${ext}`);
+                
+                const response = await fetch('/api/convert', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Conversion failed: ${response.statusText}`);
+                }
+                
+                // Download the converted file
+                const resultBlob = await response.blob();
+                const url = URL.createObjectURL(resultBlob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${filename}.${ext}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                updateStatus(`Downloaded: ${filename}.${ext}`);
+                console.log('[Download] Successfully exported to', ext);
+                
+            } catch (err) {
+                console.error('[Download] Conversion failed:', err);
+                
+                // Fallback: Download the internal format
+                updateStatus('Conversion failed, downloading internal format...');
+                downloadInternalFormat(filename);
+            }
+        }
+        
+        // Download document in internal format (can be converted later with x2t)
+        function downloadInternalFormat(filename) {
+            const template = EmptyDocTemplates[currentType];
+            if (!template) {
+                alert('Cannot export: no template available');
+                return;
+            }
+            
+            // Combine template with changes to create the full document
+            // The format is: TYPE;version;size;base64data followed by changes
+            let exportData = template;
+            
+            if (documentChanges && documentChanges.length > 0) {
+                // Append changes in the format expected by x2t
+                // Each change is appended as a separate entry
+                console.log('[Download] Including', documentChanges.length, 'changes');
+                exportData += '\n' + JSON.stringify({ changes: documentChanges });
+            }
+            
+            // Create blob and download
+            const blob = new Blob([exportData], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            
+            // Use internal format extension
+            const internalExt = currentType === 'word' ? 'bin' : 
+                               currentType === 'cell' ? 'bin' : 'bin';
+            a.download = `${filename}.${internalExt}`;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            updateStatus(`Downloaded ${filename}.${internalExt} (internal format)`);
+            console.log('[Download] Exported internal format');
+        }
+
+        // Initialize
+        updateStatus('Ready • Click "New Document", "New Spreadsheet", or "New Presentation" to start');
+        console.log('[Init] OnlyOffice Serverless Editor loaded');
+        console.log('[Init] DocsAPI available:', typeof DocsAPI !== 'undefined');
+    </script>
+</body>
+</html>
