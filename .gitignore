@@ -1,17 +1,20 @@
 # Dependencies
 node_modules/
 
-# OnlyOffice editors (large - download via setup script)
+# OnlyOffice editors (large - extract from archive via pack-assets.ps1)
 public/onlyoffice/
 
-# x2t-wasm (large files - download separately)
-x2t.js
-x2t.wasm
-x2t.zip
+# x2t hash files (the actual x2t.js and x2t.wasm are tracked via Git LFS)
 x2t.zip.sha512
 
-# OnlyOffice editor zip (large - download separately)
-onlyoffice-editor.zip
+# Large archives - tracked via Git LFS (see .gitattributes)
+# If your Git host doesn't support LFS, uncomment these:
+# onlyoffice-editor.zip
+# onlyoffice-assets.7z
+# onlyoffice-assets.zip
+# x2t.js
+# x2t.wasm
+# x2t.zip
 
 # Compressed versions (optional)
 *.br

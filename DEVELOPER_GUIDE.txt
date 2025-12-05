@@ -1,0 +1,797 @@
+================================================================================
+                    ONLYOFFICE WASM SERVERLESS EDITOR
+                         DEVELOPER DOCUMENTATION
+================================================================================
+
+This document provides comprehensive technical documentation for developers
+who want to understand, modify, or integrate this OnlyOffice editor system.
+
+================================================================================
+                              TABLE OF CONTENTS
+================================================================================
+
+1. SYSTEM OVERVIEW
+2. ARCHITECTURE & STACK
+3. FILE STRUCTURE
+4. HOW IT WORKS - DETAILED FLOW
+5. MOCK SERVER IMPLEMENTATION
+6. DOCUMENT CONVERSION (x2t-wasm)
+7. IMAGE HANDLING
+8. INTEGRATING WITH YOUR FILE SYSTEM
+9. API ENDPOINTS
+10. CUSTOMIZATION & EXTENSION
+11. TROUBLESHOOTING
+
+================================================================================
+                           1. SYSTEM OVERVIEW
+================================================================================
+
+This project provides a fully client-side OnlyOffice document editor that runs
+in the browser without requiring a traditional OnlyOffice Document Server.
+
+KEY FEATURES:
+- Create new Word, Excel, and PowerPoint documents
+- Open existing DOCX, XLSX, PPTX files
+- Edit documents with full OnlyOffice functionality
+- Download/export documents in Office formats
+- Handle embedded images
+- No server-side document processing required (except for format conversion)
+
+HOW IT'S POSSIBLE:
+OnlyOffice has a "CryptPad-patched" version that was designed to work with
+CryptPad's encrypted collaborative editing. This version includes:
+- A "connectMockServer" API that replaces the WebSocket connection
+- Client-side document loading via blob URLs
+- Internal binary format (DOCY/XLSY/PPTY) for documents
+
+We leverage these features to create a standalone editor.
+
+================================================================================
+                         2. ARCHITECTURE & STACK
+================================================================================
+
+FRONTEND:
+---------
+- Pure HTML/CSS/JavaScript (no framework)
+- OnlyOffice Web Apps v8.3 (CryptPad-patched version)
+- DocsAPI.DocEditor for editor initialization
+
+BACKEND:
+--------
+- Node.js HTTP server (no Express, minimal dependencies)
+- x2t-wasm: WebAssembly build of OnlyOffice's x2t converter
+- Static file serving for OnlyOffice assets
+
+KEY TECHNOLOGIES:
+-----------------
+1. OnlyOffice Web Apps (CryptPad patch)
+   - Located in: public/onlyoffice/v8/
+   - Provides the editor UI and document editing logic
+   - Modified to work without Document Server
+
+2. x2t-wasm Converter
+   - Files: x2t.js, x2t.wasm
+   - Converts between Office formats (DOCX, XLSX, PPTX) and internal format
+   - Runs in Node.js (could also run in browser with modifications)
+
+3. Mock Server Pattern
+   - Replaces WebSocket communication with in-memory callbacks
+   - Handles document loading, saving, locking, and collaboration messages
+
+DOCUMENT FORMAT:
+----------------
+OnlyOffice internally uses a custom binary format:
+- DOCY (Word documents): "DOCY;v5;{size};{base64data}"
+- XLSY (Excel spreadsheets): "XLSY;v2;{size};{base64data}"
+- PPTY (PowerPoint presentations): "PPTY;v1;{size};{base64data}"
+
+These are text strings containing a header and base64-encoded binary data.
+
+================================================================================
+                          3. FILE STRUCTURE
+================================================================================
+
+onlyofficewasm/
+│
+├── server.js                 # Main Node.js server
+├── x2t.js                    # x2t-wasm JavaScript loader
+├── x2t.wasm                  # x2t WebAssembly binary
+│
+├── public/                   # Static files served to browser
+│   ├── index.html            # Main application (editor UI + logic)
+│   │
+│   ├── onlyoffice/v8/        # OnlyOffice Web Apps
+│   │   ├── web-apps/         # Editor application
+│   │   │   ├── apps/
+│   │   │   │   ├── documenteditor/   # Word editor
+│   │   │   │   ├── spreadsheeteditor/ # Excel editor
+│   │   │   │   └── presentationeditor/ # PowerPoint editor
+│   │   │   └── vendor/       # Third-party libraries
+│   │   │
+│   │   ├── sdkjs/            # OnlyOffice SDK (core editing logic)
+│   │   ├── fonts/            # Font files
+│   │   └── dictionaries/     # Spell-check dictionaries
+│   │
+│   └── templates/            # Empty document templates
+│       ├── oodoc_base.js     # Empty Word document (DOCY format)
+│       ├── oocell_base.js    # Empty Excel spreadsheet (XLSY format)
+│       └── ooslide_base.js   # Empty PowerPoint presentation (PPTY format)
+│
+├── templates/                # Server-side template copies
+│
+└── samples/                  # Sample files for testing
+
+================================================================================
+                      4. HOW IT WORKS - DETAILED FLOW
+================================================================================
+
+A. CREATING A NEW DOCUMENT
+--------------------------
+
+1. User clicks "New Word/Excel/PowerPoint" button
+
+2. Client loads the appropriate template:
+   - Fetches /templates/oodoc_base.js (or oocell/ooslide)
+   - Template returns a string: "DOCY;v5;229432;{base64data}..."
+   - This is an empty document in OnlyOffice internal format
+
+3. Client creates a Blob URL from the template string:
+   ```javascript
+   const blob = new Blob([templateString], { type: 'text/plain' });
+   const url = URL.createObjectURL(blob);
+   ```
+
+4. Client initializes DocsAPI.DocEditor with config:
+   ```javascript
+   const config = {
+       documentType: 'word',  // or 'spreadsheet' or 'presentation'
+       document: {
+           fileType: 'docx',
+           url: blobUrl,      // The blob URL with template
+           title: 'Untitled.docx'
+       },
+       editorConfig: { mode: 'edit' }
+   };
+   editor = new DocsAPI.DocEditor('editor', config);
+   ```
+
+5. Client connects the Mock Server:
+   ```javascript
+   editor.connectMockServer(mockServerObject);
+   ```
+
+6. OnlyOffice loads the document from the blob URL and initializes
+
+B. OPENING AN EXISTING FILE
+---------------------------
+
+1. User selects a file via the file picker
+
+2. Client reads the file as ArrayBuffer:
+   ```javascript
+   const arrayBuffer = await file.arrayBuffer();
+   ```
+
+3. Client sends to server for conversion:
+   ```javascript
+   fetch('/api/open', {
+       method: 'POST',
+       headers: { 'X-File-Extension': 'docx' },
+       body: arrayBuffer
+   });
+   ```
+
+4. Server converts using x2t-wasm:
+   - Writes input file to virtual filesystem
+   - Runs x2t conversion to internal format (.bin)
+   - x2t outputs: "DOCY;v5;{size};{base64data}"
+   - Extracts any embedded images to data URLs
+
+5. Server returns JSON:
+   ```json
+   {
+       "success": true,
+       "data": "DOCY;v5;50544;...",
+       "images": {
+           "image1.jpg": "data:image/jpeg;base64,..."
+       }
+   }
+   ```
+
+6. Client creates blob URL and initializes editor (same as new document)
+
+7. Mock Server's getImageURL() returns data URLs for embedded images
+
+C. DOWNLOADING/SAVING A DOCUMENT
+--------------------------------
+
+1. User clicks Download or uses File > Save
+
+2. OnlyOffice sends POST to /onlyoffice/v8/downloadas/{docId}
+   - Body contains the document in internal binary format
+   - Query params specify output format (e.g., outputformat=65 for DOCX)
+
+3. Server receives the binary and converts using x2t-wasm:
+   - Input: Internal binary format
+   - Output: DOCX/XLSX/PPTX file
+
+4. Server stores the converted file and returns download URL
+
+5. Client triggers file download
+
+================================================================================
+                      5. MOCK SERVER IMPLEMENTATION
+================================================================================
+
+The Mock Server is the key component that makes OnlyOffice work without a
+real Document Server. It's implemented in public/index.html.
+
+MOCK SERVER OBJECT STRUCTURE:
+-----------------------------
+
+```javascript
+const mockServer = {
+    // Called when OnlyOffice sends a message
+    onMessage: function(msg) {
+        switch(msg.type) {
+            case 'saveChanges':
+                // Handle document changes (for collaborative editing)
+                // Acknowledge: send { type: 'saveChanges', changesIndex, locks }
+                break;
+            
+            case 'getLock':
+                // Handle editing lock requests
+                // Grant lock: send { type: 'getLock', locks: {...} }
+                break;
+            
+            case 'isSaveLock':
+                // Check if save is locked
+                // Response: send { type: 'saveLock', saveLock: false }
+                break;
+            
+            case 'unSaveLock':
+                // Release save lock
+                break;
+            
+            case 'cursor':
+                // Cursor position updates (ignore in single-user)
+                break;
+            
+            case 'openDocument':
+                // Handle image URL requests (e.g., when duplicating slides)
+                break;
+        }
+    },
+    
+    // Return list of participants
+    getParticipants: function() {
+        return {
+            list: [{ id: 'user_local', username: 'Guest', view: false }],
+            index: 0
+        };
+    },
+    
+    // Called after authentication completes
+    onAuth: function() {
+        console.log('Editor authenticated');
+    },
+    
+    // Get image URL by name - CRITICAL for image loading
+    getImageURL: function(name) {
+        // Return Promise that resolves to image URL
+        if (currentDocumentImages[name]) {
+            return Promise.resolve(currentDocumentImages[name]);
+        }
+        return Promise.resolve('');
+    },
+    
+    // Return initial collaborative changes (empty for single-user)
+    getInitialChanges: function() {
+        return [];  // No pending changes
+    },
+    
+    // Called when document binary is ready
+    onDocumentBinaryReady: function(binary) {
+        // Store for export
+    }
+};
+
+// Connect to editor
+const sendToEditor = editor.connectMockServer(mockServer);
+```
+
+SENDING MESSAGES TO EDITOR:
+---------------------------
+
+The connectMockServer() returns a function to send messages back:
+
+```javascript
+// Grant a lock
+sendToEditor({
+    type: 'getLock',
+    locks: { 'block_id': { user: 'user_local', block: blockData } }
+});
+
+// Acknowledge save
+sendToEditor({
+    type: 'saveChanges',
+    changesIndex: 5,
+    locks: []
+});
+```
+
+================================================================================
+                     6. DOCUMENT CONVERSION (x2t-wasm)
+================================================================================
+
+x2t is OnlyOffice's document converter. The WASM version runs in Node.js.
+
+CONVERSION PARAMETERS (XML):
+----------------------------
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<TaskQueueDataConvert>
+  <m_sFontDir>/working/fonts/</m_sFontDir>
+  <m_sThemeDir>/working/themes</m_sThemeDir>
+  <m_sFileFrom>/working/input.docx</m_sFileFrom>
+  <m_sFileTo>/working/output.bin</m_sFileTo>
+  <m_bIsNoBase64>false</m_bIsNoBase64>
+</TaskQueueDataConvert>
+```
+
+KEY PARAMETERS:
+- m_sFileFrom: Input file path (in virtual filesystem)
+- m_sFileTo: Output file path
+- m_bIsNoBase64: false = output as base64 string (DOCY format)
+                 true = output as raw binary
+
+CONVERSION CODE:
+----------------
+
+```javascript
+// Initialize virtual filesystem
+x2t.FS.mkdir('/working');
+x2t.FS.mkdir('/working/media');
+
+// Write input file
+x2t.FS.writeFile('/working/input.docx', inputBuffer);
+
+// Write conversion params
+x2t.FS.writeFile('/working/params.xml', paramsXml);
+
+// Run conversion
+const result = x2t.ccall("main1", "number", ["string"], ["/working/params.xml"]);
+
+// Read output (as UTF-8 text for DOCY format)
+const outputBytes = x2t.FS.readFile('/working/output.bin');
+const outputString = new TextDecoder('utf-8').decode(outputBytes);
+// outputString = "DOCY;v5;50544;base64data..."
+
+// Read extracted images
+const mediaFiles = x2t.FS.readdir('/working/media');
+for (const file of mediaFiles) {
+    const imageData = x2t.FS.readFile('/working/media/' + file);
+    // Convert to data URL
+}
+```
+
+FORMAT CODES (outputformat parameter):
+--------------------------------------
+- 65: DOCX (Word)
+- 257: XLSX (Excel)  
+- 129: PPTX (PowerPoint)
+- 513: PDF
+
+================================================================================
+                         7. IMAGE HANDLING
+================================================================================
+
+Images are handled in three scenarios:
+
+A. IMAGES IN OPENED DOCUMENTS
+-----------------------------
+
+1. When x2t converts DOCX to DOCY, images are extracted to /working/media/
+2. Server reads these and converts to base64 data URLs
+3. Server returns images in response: { images: { "image1.jpg": "data:..." } }
+4. Client stores in currentDocumentImages object
+5. Mock Server's getImageURL() returns these data URLs when OnlyOffice requests
+
+B. INSERTING NEW IMAGES (From File)
+-----------------------------------
+
+1. OnlyOffice calls window.parent.APP.AddImage(successCallback, errorCallback)
+2. Our implementation opens a file picker
+3. User selects image file
+4. We read file as data URL using FileReader
+5. We call successCallback({ name: 'image_123.jpg', url: 'data:...' })
+6. OnlyOffice inserts the image using the provided URL
+
+```javascript
+window.APP.AddImage = function(successCallback, errorCallback) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = function(evt) {
+            const dataUrl = evt.target.result;
+            const imageName = 'image_' + Date.now() + '.jpg';
+            
+            // Store in cache
+            currentDocumentImages[imageName] = dataUrl;
+            
+            // Add to OnlyOffice document URLs
+            const iframe = document.querySelector('#editor iframe');
+            const documentUrls = iframe.contentWindow.AscCommon.g_oDocumentUrls;
+            documentUrls.addImageUrl(imageName, dataUrl);
+            
+            // Call success callback
+            successCallback({ name: imageName, url: dataUrl });
+        };
+        
+        reader.readAsDataURL(file);
+    };
+    
+    input.click();
+};
+```
+
+C. INSERTING IMAGES FROM URL
+----------------------------
+
+1. OnlyOffice calls window.parent.APP.AddImageUrl(url, successCb, errorCb)
+2. We try to load image client-side (may fail due to CORS)
+3. If CORS fails, we proxy through server: GET /api/fetch-image?url=...
+4. Server fetches image and returns as data URL
+5. We call successCallback with the data URL
+
+================================================================================
+                   8. INTEGRATING WITH YOUR FILE SYSTEM
+================================================================================
+
+To integrate this editor with your own file storage system:
+
+A. LOADING DOCUMENTS FROM YOUR STORAGE
+--------------------------------------
+
+Replace the file picker logic in openFile():
+
+```javascript
+async function loadDocumentFromYourStorage(documentId) {
+    // 1. Fetch document from your storage
+    const response = await fetch('/your-api/documents/' + documentId);
+    const arrayBuffer = await response.arrayBuffer();
+    const fileExtension = 'docx';  // Get from your metadata
+    
+    // 2. Convert to OnlyOffice format
+    const convertResponse = await fetch('/api/open', {
+        method: 'POST',
+        headers: { 'X-File-Extension': fileExtension },
+        body: arrayBuffer
+    });
+    const result = await convertResponse.json();
+    
+    // 3. Store images
+    currentDocumentImages = result.images || {};
+    
+    // 4. Create blob URL
+    const blob = new Blob([result.data], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    
+    // 5. Initialize editor
+    createEditorForOpenedFile(docType, filename, fileExtension, url);
+}
+```
+
+B. SAVING DOCUMENTS TO YOUR STORAGE
+-----------------------------------
+
+Intercept the download process:
+
+```javascript
+// In the download handler, instead of triggering browser download:
+async function saveToYourStorage(documentId, fileBuffer, filename) {
+    await fetch('/your-api/documents/' + documentId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: fileBuffer
+    });
+}
+```
+
+C. AUTO-SAVE IMPLEMENTATION
+---------------------------
+
+OnlyOffice can send periodic changes. Capture them:
+
+```javascript
+// In mockServer.onMessage:
+case 'saveChanges':
+    // Store changes for auto-save
+    documentChanges.push(...msg.changes);
+    
+    // Debounce auto-save
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+        saveChangesToYourStorage(documentChanges);
+    }, 5000);
+    
+    // Acknowledge
+    sendToEditor({ type: 'saveChanges', changesIndex: documentChanges.length });
+    break;
+```
+
+D. COLLABORATIVE EDITING (Advanced)
+-----------------------------------
+
+For real-time collaboration, you'd need to:
+
+1. Replace mock server with WebSocket connection to your server
+2. Broadcast changes to all connected clients
+3. Handle operational transformation (OT) or CRDT for conflict resolution
+4. Manage locks and cursors across users
+
+The mock server's message format is compatible with this - you'd just route
+messages through WebSocket instead of handling locally.
+
+================================================================================
+                          9. API ENDPOINTS
+================================================================================
+
+POST /api/open
+--------------
+Convert Office document to OnlyOffice internal format.
+
+Request:
+- Body: Raw file bytes (ArrayBuffer)
+- Headers:
+  - X-File-Extension: 'docx' | 'xlsx' | 'pptx' | 'doc' | 'xls' | 'ppt' | etc.
+
+Response:
+```json
+{
+    "success": true,
+    "data": "DOCY;v5;50544;base64encodeddata...",
+    "size": 67406,
+    "format": "cryptpad",
+    "images": {
+        "image1.jpg": "data:image/jpeg;base64,...",
+        "image2.png": "data:image/png;base64,..."
+    }
+}
+```
+
+POST /onlyoffice/v8/downloadas/{docId}
+--------------------------------------
+Convert internal format back to Office format.
+
+Request:
+- Body: Document binary in OnlyOffice internal format
+- Query params:
+  - cmd: JSON with conversion options
+    - outputformat: Format code (65=DOCX, 257=XLSX, 129=PPTX, 513=PDF)
+    - title: Output filename
+
+Response:
+```json
+{
+    "error": 0,
+    "key": "doc_123",
+    "url": "/downloads/abc123/Document.docx",
+    "end": true
+}
+```
+
+GET /api/fetch-image
+--------------------
+Proxy for fetching external images (CORS bypass).
+
+Request:
+- Query params:
+  - url: The external image URL to fetch
+
+Response:
+```json
+{
+    "success": true,
+    "dataUrl": "data:image/jpeg;base64,...",
+    "size": 45678
+}
+```
+
+GET /api/latest-download
+------------------------
+Poll for completed download (used by client to get download result).
+
+Response:
+```json
+{
+    "ready": true,
+    "url": "/downloads/abc123/Document.docx",
+    "filename": "Document.docx"
+}
+```
+or
+```json
+{
+    "ready": false
+}
+```
+
+GET /downloads/{id}/{filename}
+------------------------------
+Download converted file.
+
+Response: Raw file bytes with appropriate Content-Type
+
+================================================================================
+                      10. CUSTOMIZATION & EXTENSION
+================================================================================
+
+A. CHANGING EDITOR APPEARANCE
+-----------------------------
+
+Editor customization is done in the config object:
+
+```javascript
+const config = {
+    editorConfig: {
+        customization: {
+            autosave: false,           // Disable auto-save indicator
+            forcesave: false,          // Disable force-save
+            chat: false,               // Hide chat
+            comments: false,           // Hide comments
+            compactHeader: true,       // Compact header mode
+            compactToolbar: false,     // Full toolbar
+            help: false,               // Hide help button
+            hideRightMenu: false,      // Show right panel
+            about: false,              // Hide about
+            feedback: false,           // Hide feedback
+            
+            // Custom logo
+            logo: {
+                image: '/your-logo.png',
+                url: 'https://yoursite.com'
+            },
+            
+            // Custom colors
+            customer: {
+                logo: '/logo.png',
+                name: 'Your Company'
+            }
+        }
+    }
+};
+```
+
+B. ADDING CUSTOM TOOLBAR BUTTONS
+--------------------------------
+
+OnlyOffice supports plugins for custom functionality. See:
+public/onlyoffice/v8/sdkjs/plugins/
+
+C. HANDLING ADDITIONAL EVENTS
+-----------------------------
+
+```javascript
+events: {
+    onAppReady: function() { /* Editor loaded */ },
+    onDocumentReady: function() { /* Document loaded */ },
+    onError: function(e) { /* Handle errors */ },
+    onWarning: function(e) { /* Handle warnings */ },
+    onDownloadAs: function(e) { /* Download triggered */ },
+    onRequestSaveAs: function(e) { /* Save As requested */ },
+    onRequestSave: function(e) { /* Save requested */ },
+    onRequestClose: function() { /* Close requested */ },
+    onInfo: function(e) { /* Info events */ }
+}
+```
+
+D. SUPPORTING ADDITIONAL FILE FORMATS
+-------------------------------------
+
+x2t supports many formats. Add to the typeMap:
+
+```javascript
+const typeMap = {
+    'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
+    'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
+    'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
+};
+```
+
+================================================================================
+                         11. TROUBLESHOOTING
+================================================================================
+
+ISSUE: "File content does not match file extension" error
+---------------------------------------------------------
+Cause: The document format doesn't match what OnlyOffice expects.
+Solution: Ensure x2t conversion outputs the correct format string
+(DOCY;v5;... for Word, XLSY;v2;... for Excel, PPTY;v1;... for PowerPoint)
+
+ISSUE: Document loads but shows "Loading document..." forever
+-------------------------------------------------------------
+Cause: Mock server not connected or getInitialChanges issue.
+Solution: 
+1. Check that editor.connectMockServer() is called
+2. Ensure getInitialChanges() returns [] (empty array)
+3. Check browser console for errors
+
+ISSUE: Images not showing in opened documents
+---------------------------------------------
+Cause: getImageURL() not returning correct URLs.
+Solution:
+1. Check that images are extracted during conversion
+2. Verify currentDocumentImages is populated
+3. Ensure getImageURL() returns the correct data URL
+
+ISSUE: Cannot insert images
+---------------------------
+Cause: APP.AddImage not implemented correctly.
+Solution:
+1. Ensure window.APP.AddImage is defined before editor loads
+2. Check that successCallback is called with { name, url }
+3. Verify image is added to documentUrls
+
+ISSUE: Download not working
+---------------------------
+Cause: Download endpoint or polling issue.
+Solution:
+1. Check server logs for conversion errors
+2. Verify /api/latest-download returns the file
+3. Check browser console for fetch errors
+
+ISSUE: Fonts not rendering correctly
+------------------------------------
+Cause: Font files missing or not loading.
+Solution:
+1. Ensure public/onlyoffice/v8/fonts/ contains font files
+2. Check network tab for 404 errors on font requests
+3. Verify font directory structure matches OnlyOffice expectations
+
+ISSUE: Editor iframe not full size
+----------------------------------
+Cause: CSS issues with iframe sizing.
+Solution: Add to your CSS:
+```css
+#editor { position: relative; width: 100%; height: 100%; }
+#editor iframe { 
+    position: absolute; 
+    width: 100% !important; 
+    height: 100% !important; 
+}
+```
+
+================================================================================
+                              QUICK REFERENCE
+================================================================================
+
+Start server:           node server.js
+Server URL:             http://localhost:8080
+Editor page:            http://localhost:8080/
+
+Document formats:       DOCY (Word), XLSY (Excel), PPTY (PowerPoint)
+Template location:      public/templates/
+OnlyOffice assets:      public/onlyoffice/v8/
+
+Key functions:
+- createDocument(type)              Create new document
+- openFile(event)                   Open file from picker
+- createEditorForOpenedFile(...)    Initialize editor with document
+- connectMockServer(editor, ...)    Connect mock server to editor
+- downloadDocument()                Export/download document
+
+Key objects:
+- editor                            DocsAPI.DocEditor instance
+- currentDocumentImages             Image cache (name -> data URL)
+- EmptyDocTemplates                 Template cache (type -> template string)
+
+================================================================================
+                                   END
+================================================================================

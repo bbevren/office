@@ -2,28 +2,65 @@
 
 ## What is this?
 
-**OnlyOffice x2t-wasm** - A simple, serverless file converter that runs in Node.js.
+**OnlyOffice x2t-wasm** - A serverless OnlyOffice document editor with file conversion.
 
-Convert between office formats **without a server**:
+Features:
+- **Web Editor**: Full OnlyOffice document editor running in your browser
+- **File Converter**: Convert between office formats using WebAssembly
+- **100% Offline**: Everything runs locally, no server needed
+
+Supported formats:
 - Word: DOCX ↔ DOC ↔ ODT ↔ TXT
 - Excel: XLSX ↔ XLS ↔ ODS ↔ CSV
 - PowerPoint: PPTX ↔ PPT ↔ ODP
 
-Everything runs **100% offline** using WebAssembly!
+## First Time Setup
 
-## Try it now (Already Set Up!)
+### Option 1: Clone with Git LFS (Recommended)
+
+```bash
+# Install Git LFS if you don't have it
+git lfs install
+
+# Clone the repository
+git clone https://github.com/bbevren/office.git
+cd office
+
+# Run setup script
+# Windows (PowerShell):
+./setup.ps1
+
+# Linux/Mac:
+chmod +x setup.sh && ./setup.sh
+```
+
+### Option 2: Download Without Git LFS
+
+If you download as a ZIP or don't have Git LFS, the setup script will automatically download the required files from GitHub releases.
+
+```bash
+# Windows (PowerShell):
+./setup.ps1
+
+# Linux/Mac:
+chmod +x setup.sh && ./setup.sh
+```
+
+## Start the Editor
+
+```bash
+node server.js
+```
+
+Then open **http://localhost:8080** in your browser.
+
+## Use the File Converter
 
 ```bash
 node example.js
 ```
 
-Watch the detailed logs to see:
-- WASM initialization
-- File system operations
-- Conversion progress
-- Success/error messages
-
-## Use in your code
+Or use in your code:
 
 ```javascript
 const { convertFile } = require('./converter');
@@ -66,7 +103,12 @@ await convertFile('slides.pptx', 'slides.ppt');     // PPTX → PPT
 ✅ **Offline** - Works without internet  
 ✅ **Private** - All processing is local  
 ✅ **Fast** - Native WASM performance  
-✅ **Simple** - No dependencies to install
+✅ **Simple** - One setup script does everything
+
+## More Documentation
+
+- **DEVELOPER_GUIDE.txt** - Detailed technical documentation
+- **README.md** - Full project overview
 
 ## Versions
 

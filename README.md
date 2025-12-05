@@ -11,37 +11,108 @@ Complete OnlyOffice setup running **serverless** with **x2t-wasm** converter.
 - **Web Editors**: Full OnlyOffice UI from CryptPad v8.3.3.23+5 (patched)
 - **File Converter**: x2t-wasm v8.3.0+0 for format conversion
 - **Serverless**: No document server needed
+- **Open & Edit**: Open existing DOCX/XLSX/PPTX files
+- **Image Support**: Insert images from file or URL
 - **Simple**: Node.js built-in HTTP server (zero dependencies)
 
 ## Quick Start
 
-### 1. Download OnlyOffice
+### 1. Clone with Git LFS
 
-Run the setup script to download CryptPad's patched OnlyOffice v8.3:
+This repo uses Git LFS for large files. Make sure you have Git LFS installed:
 
-```powershell
-.\setup.ps1
+```bash
+git lfs install
+git clone https://github.com/bbevren/onlyofficewasm.git
+cd onlyofficewasm
 ```
 
-This downloads:
-- OnlyOffice Web Editors v8.3.3.23+5 (~50MB)
-- Verifies SHA512 checksum
-- Extracts to `public/onlyoffice/v8/`
+### 2. Extract OnlyOffice Assets
 
-### 2. Start the Server
+The OnlyOffice web editors are stored as a compressed archive. Extract them:
+
+```powershell
+# Windows PowerShell
+.\pack-assets.ps1 -Unpack
+```
+
+Or manually extract `onlyoffice-editor.zip` to `public/onlyoffice/`
+
+### 3. Start the Server
 
 ```bash
 npm start
 ```
 
-### 3. Open in Browser
+### 4. Open in Browser
 
 Navigate to: **http://localhost:8080**
 
-You'll see three buttons:
+You'll see:
 - 📝 **New Document** - Create Word documents
 - 📊 **New Spreadsheet** - Create Excel spreadsheets  
 - 📽️ **New Presentation** - Create PowerPoint presentations
+- 📂 **Open File** - Open existing documents
+
+## Git LFS Setup
+
+Large files are tracked with Git LFS (see `.gitattributes`):
+- `*.zip` - OnlyOffice editor archive
+- `*.7z` - Compressed assets
+- `x2t.wasm` - Converter (32 MB)
+- `x2t.js` - Converter loader (17 MB)
+
+The `public/onlyoffice/` folder (940 MB extracted) is NOT tracked.
+Instead, we track the compressed archive and extract it locally.
+
+### For New Developers
+
+After cloning, run the setup script:
+
+```powershell
+# Windows
+.\setup.ps1
+
+# Linux/Mac
+./setup.sh
+```
+
+This will:
+1. Pull Git LFS files (or download from GitHub releases)
+2. Extract OnlyOffice editors to `public/onlyoffice/`
+3. Install npm dependencies
+
+### Developer Workflow
+
+When making changes to OnlyOffice editor files:
+
+```powershell
+# 1. Edit files in public/onlyoffice/ as needed
+
+# 2. Before committing - create new zip from your changes
+.\update-assets.ps1
+
+# 3. Commit and push (LFS handles the large zip)
+git add .
+git commit -m "Update OnlyOffice assets"
+git push
+```
+
+### After Reverting a Commit
+
+When you revert/restore HEAD, the zip file reverts but the extracted folder doesn't (it's gitignored). Re-extract the folder:
+
+```powershell
+.\update-assets.ps1 -Restore
+```
+
+### Asset Management Commands
+
+| Command | Description |
+|---------|-------------|
+| `.\update-assets.ps1` | Create zip from `public/onlyoffice/` folder |
+| `.\update-assets.ps1 -Restore` | Extract zip back to folder (after revert) |
+| `.\setup.ps1` | Full setup (download/extract + npm install) |
 
 ## What You Get
 
