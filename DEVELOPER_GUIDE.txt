@@ -104,10 +104,19 @@ onlyofficewasm/
 ├── x2t.js                    # x2t-wasm JavaScript loader
 ├── x2t.wasm                  # x2t WebAssembly binary
 │
+├── setup.ps1                 # Initial setup script (run after clone)
+├── setup.sh                  # Linux/Mac setup script
+├── update-assets.ps1         # Pack OnlyOffice changes into zip (before commit)
+├── update-assets.sh          # Linux/Mac version
+├── pack-assets.ps1           # Create zip archives (internal use)
+│
+├── onlyoffice-editor.zip     # Git LFS: Compressed OnlyOffice assets
+├── x2t.zip                   # Git LFS: Compressed x2t-wasm files
+│
 ├── public/                   # Static files served to browser
 │   ├── index.html            # Main application (editor UI + logic)
 │   │
-│   ├── onlyoffice/v8/        # OnlyOffice Web Apps
+│   ├── onlyoffice/v8/        # OnlyOffice Web Apps (extracted from zip)
 │   │   ├── web-apps/         # Editor application
 │   │   │   ├── apps/
 │   │   │   │   ├── documenteditor/   # Word editor
@@ -127,6 +136,89 @@ onlyofficewasm/
 ├── templates/                # Server-side template copies
 │
 └── samples/                  # Sample files for testing
+
+================================================================================
+                    3.1 SETUP & ASSET MANAGEMENT SCRIPTS
+================================================================================
+
+The OnlyOffice editor files are large (~200MB), so they're stored compressed
+in Git LFS. These scripts manage extraction and compression.
+
+SETUP.PS1 / SETUP.SH (Run after cloning)
+-----------------------------------------
+Purpose: Extract OnlyOffice and x2t-wasm from zip files for development.
+
+When to run:
+- After cloning the repository for the first time
+- After pulling changes that updated the zip files
+
+What it does:
+1. Creates necessary directories (public/onlyoffice, output)
+2. Pulls Git LFS files if available
+3. Extracts x2t.zip → x2t.js, x2t.wasm
+4. Extracts onlyoffice-editor.zip → public/onlyoffice/v8/
+5. Sets up fonts directory
+
+Usage:
+  Windows:  .\setup.ps1
+  Linux:    ./setup.sh
+
+UPDATE-ASSETS.PS1 / UPDATE-ASSETS.SH (Run before committing)
+------------------------------------------------------------
+Purpose: Pack your OnlyOffice changes back into the zip file.
+
+When to run:
+- BEFORE committing if you modified files in public/onlyoffice/
+- Not needed if you only changed index.html, server.js, etc.
+
+What it does:
+1. Compresses public/onlyoffice/ → onlyoffice-editor.zip
+2. The zip is tracked by Git LFS for efficient storage
+
+Usage:
+  Windows:  .\update-assets.ps1
+            Choose: 1 (OnlyOffice) or 2 (All assets)
+  
+  Linux:    ./update-assets.sh
+
+Restore mode (after git revert):
+  Windows:  .\update-assets.ps1 -Restore
+  Linux:    ./update-assets.sh --restore
+
+PACK-ASSETS.PS1 (Internal use)
+------------------------------
+Purpose: Creates zip archives from folders. Used internally by other scripts.
+
+DEVELOPER WORKFLOW SUMMARY:
+---------------------------
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  AFTER CLONING REPO                                                     │
+│  .\setup.ps1  →  Extracts zip files to working folders                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  DEVELOPMENT                                                            │
+│  Edit files in public/onlyoffice/, public/index.html, server.js, etc.   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  BEFORE COMMITTING                                                      │
+│  If you changed public/onlyoffice/*:                                    │
+│      .\update-assets.ps1  →  Packs changes into zip                     │
+│  Then:                                                                  │
+│      git add .                                                          │
+│      git commit -m "message"                                            │
+│      git push                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  AFTER GIT REVERT (if needed)                                           │
+│  .\update-assets.ps1 -Restore  →  Extracts zip back to folders          │
+└─────────────────────────────────────────────────────────────────────────┘
 
 ================================================================================
                       4. HOW IT WORKS - DETAILED FLOW
