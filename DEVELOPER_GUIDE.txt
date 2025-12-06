@@ -15,12 +15,16 @@ who want to understand, modify, or integrate this OnlyOffice editor system.
 3. FILE STRUCTURE
 4. HOW IT WORKS - DETAILED FLOW
 5. MOCK SERVER IMPLEMENTATION
-6. DOCUMENT CONVERSION (x2t-wasm)
-7. IMAGE HANDLING
-8. INTEGRATING WITH YOUR FILE SYSTEM
-9. API ENDPOINTS
-10. CUSTOMIZATION & EXTENSION
-11. TROUBLESHOOTING
+6. CO-EDITING & LOCK MECHANISM
+7. PDF CONVERSION & EXPORT
+8. DOCUMENT CONVERSION (x2t-wasm)
+9. IMAGE HANDLING
+10. SUPPORTED FILE FORMATS
+11. CRYPTPAD-PATCHED ONLYOFFICE (APP HOOKS)
+12. INTEGRATING WITH YOUR FILE SYSTEM
+13. API ENDPOINTS
+14. CUSTOMIZATION & EXTENSION
+15. TROUBLESHOOTING
 
 ================================================================================
                            1. SYSTEM OVERVIEW
@@ -31,11 +35,13 @@ in the browser without requiring a traditional OnlyOffice Document Server.
 
 KEY FEATURES:
 - Create new Word, Excel, and PowerPoint documents
-- Open existing DOCX, XLSX, PPTX files
+- Open existing documents in many formats (see Section 10)
 - Edit documents with full OnlyOffice functionality
+- Export to PDF (Word, Excel, PowerPoint)
 - Download/export documents in Office formats
 - Handle embedded images
 - No server-side document processing required (except for format conversion)
+- Optional co-editing support (disabled by default)
 
 HOW IT'S POSSIBLE:
 OnlyOffice has a "CryptPad-patched" version that was designed to work with
@@ -43,6 +49,7 @@ CryptPad's encrypted collaborative editing. This version includes:
 - A "connectMockServer" API that replaces the WebSocket connection
 - Client-side document loading via blob URLs
 - Internal binary format (DOCY/XLSY/PPTY) for documents
+- APP hooks for parent window communication
 
 We leverage these features to create a standalone editor.
 
@@ -125,8 +132,8 @@ onlyofficewasm/
                       4. HOW IT WORKS - DETAILED FLOW
 ================================================================================
 
-A. CREATING A NEW DOCUMENT
---------------------------
+A. CREATING A NEW DOCUMENT (Manual)
+-----------------------------------
 
 1. User clicks "New Word/Excel/PowerPoint" button
 
@@ -162,7 +169,62 @@ A. CREATING A NEW DOCUMENT
 
 6. OnlyOffice loads the document from the blob URL and initializes
 
-B. OPENING AN EXISTING FILE
+B. CREATING A NEW DOCUMENT (URL Parameter)
+------------------------------------------
+
+Users can create a new document by navigating to a URL with filename:
+
+URL FORMAT:
+  http://localhost:8080/?f=MyDocument.docx
+  http://localhost:8080/?f=Budget.xlsx
+  http://localhost:8080/?f=Presentation.pptx
+
+HOW IT WORKS:
+
+1. On page load, JavaScript checks for 'f' URL parameter:
+   ```javascript
+   const urlParams = new URLSearchParams(window.location.search);
+   const fileParam = urlParams.get('f');
+   ```
+
+2. If 'f' parameter exists, extract filename and extension:
+   ```javascript
+   const filename = fileParam.replace(/\.[^/.]+$/, '');  // Remove extension
+   const ext = fileParam.split('.').pop().toLowerCase();
+   ```
+
+3. Map extension to document type:
+   ```javascript
+   const typeMap = {
+       'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
+       'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
+       'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
+   };
+   const docType = typeMap[ext];
+   ```
+
+4. Set filename in input field and create new document:
+   ```javascript
+   document.getElementById('filename').value = filename;
+   createDocument(docType);  // Creates empty document of that type
+   ```
+
+SUPPORTED EXTENSIONS FOR NEW DOCUMENTS:
+- Word: docx, doc, odt, rtf (creates Word editor)
+- Excel: xlsx, xls, ods, csv (creates Excel editor)
+- PowerPoint: pptx, ppt, odp (creates PowerPoint editor)
+
+EXAMPLE URLS:
+- /?f=Report.docx        → Opens Word editor, filename "Report"
+- /?f=Q4-Budget.xlsx     → Opens Excel editor, filename "Q4-Budget"
+- /?f=Sales-Pitch.pptx   → Opens PowerPoint editor, filename "Sales-Pitch"
+- /?f=Notes.doc          → Opens Word editor, filename "Notes"
+- /?f=Data.csv           → Opens Excel editor, filename "Data"
+
+COMBINING WITH CO-EDIT:
+- /?f=Document.docx&coedit=true  → New Word doc with co-editing enabled
+
+C. OPENING AN EXISTING FILE
 ---------------------------
 
 1. User selects a file via the file picker
@@ -321,7 +383,185 @@ sendToEditor({
 ```
 
 ================================================================================
-                     6. DOCUMENT CONVERSION (x2t-wasm)
+                   6. CO-EDITING & LOCK MECHANISM
+================================================================================
+
+The CryptPad-patched OnlyOffice includes collaborative editing features.
+By default, we DISABLE co-editing to avoid lock visualization issues.
+
+UNDERSTANDING THE LOCK MECHANISM:
+---------------------------------
+
+When multiple users edit a document, OnlyOffice uses locks to prevent
+conflicts. The editor:
+1. Requests locks via 'getLock' message when user starts editing a paragraph
+2. Shows visual indicators (colored bars) for locked regions
+3. Releases locks via 'releaseLock' when editing completes
+
+LOCK VISUALIZATION PROBLEM:
+---------------------------
+
+In single-user mode, if locks are not handled correctly, OnlyOffice shows
+red "Guest" labels and locks controls after typing. This happens because:
+1. The editor requests locks via mock server
+2. If lock response isn't formatted correctly, the lock is marked as "Other"
+3. Locks owned by "Other" users show red indicators and may freeze controls
+
+THE SOLUTION - TWO MOCK SERVER MODES:
+-------------------------------------
+
+1. connectMockServer (Full mode) - Used when ?coedit=true in URL:
+   - Handles all collaborative messages
+   - Returns empty locks (allows editing but may show indicators)
+   
+2. connectMockServerFast (Single-user mode) - Default:
+   - Returns locks as "owned by current user" (locktype_Mine)
+   - Combined with fast mode, prevents lock visualization
+   - Minimal collaborative overhead
+
+KEY LOCK HANDLING CODE (connectMockServerFast):
+-----------------------------------------------
+
+```javascript
+// When editor requests a lock, claim it for this user
+if (msg.type === 'getLock') {
+    const blocks = msg.block || [];
+    const locks = {};
+    blocks.forEach(block => {
+        locks[JSON.stringify(block)] = {
+            block: block,
+            user: myOOId,        // Same as current user ID
+            time: Date.now(),
+            sessionId: myOOId
+        };
+    });
+    sendMsg({ type: 'getLock', locks: locks });
+    return;
+}
+```
+
+WHY THIS WORKS:
+---------------
+
+In sdk-all.js, the DrawLockParagraph function has this condition:
+
+```javascript
+if (lock_type === locktype_None || 
+    IsLockObjectsEnable === false || 
+    isViewMode || 
+    lock_type === locktype_Mine && CollaborativeEditing.Is_Fast())
+    return;  // Don't draw lock indicator
+```
+
+Our solution ensures:
+1. lock_type = locktype_Mine (user owns the lock)
+2. CollaborativeEditing.Is_Fast() = true (fast mode enabled via APP.onFastChange)
+
+ADDITIONAL LOCK PATCHES (disableLockMechanism):
+-----------------------------------------------
+
+The public/index.html includes a disableLockMechanism() function that
+patches the iframe's OnlyOffice instance for extra safety:
+
+- Sets IsLockObjectsEnable = false
+- Patches DrawLockParagraph to do nothing
+- Forces Is_Fast() to return true
+- Patches IsSelectionLocked to return false
+- Makes Add_CheckLock a no-op
+
+ENABLING CO-EDITING FOR FUTURE USE:
+-----------------------------------
+
+To enable full co-editing (for a custom collaboration server):
+1. Add ?coedit=true to the URL
+2. The full connectMockServer will be used
+3. Replace mock server with your WebSocket implementation
+4. Route messages through your collaboration server
+
+================================================================================
+                     7. PDF CONVERSION & EXPORT
+================================================================================
+
+PDF export uses OnlyOffice's internal PDF rendering with x2t-wasm conversion.
+
+HOW PDF EXPORT WORKS:
+---------------------
+
+1. User clicks "Download as PDF" button
+
+2. OnlyOffice renders document to internal PDF format (pdf.bin):
+   - Calls window.parent.APP.printPdf(dataContainer, callback)
+   - dataContainer.data contains the pdf.bin binary data
+
+3. Our APP.printPdf implementation:
+   a. Extracts pdf.bin from dataContainer
+   b. Gets document binary (docBin) for additional data
+   c. Sends both to server: POST /api/print-pdf
+
+4. Server converts pdf.bin to actual PDF:
+   - Uses x2t-wasm to convert pdf.bin to PDF
+   - Returns the rendered PDF file
+
+5. Client downloads the PDF file
+
+PDF EXPORT CODE (APP.printPdf):
+-------------------------------
+
+```javascript
+window.APP.printPdf = function(dataContainer, callback) {
+    const pdfBinData = dataContainer?.data;
+    if (!pdfBinData) {
+        callback && callback({ status: 'err' });
+        return;
+    }
+    
+    // Get document binary for full conversion
+    let docBin = window.currentDocumentBinary;
+    if (!docBin) {
+        // Try to get from editor API
+        const iframe = document.querySelector('#editor iframe');
+        const api = iframe?.contentWindow?.Asc?.editor;
+        if (api?.asc_nativeGetFile) {
+            docBin = api.asc_nativeGetFile();
+        }
+    }
+    
+    const formData = new FormData();
+    if (docBin) formData.append('docbin', new Blob([docBin]), 'document.bin');
+    formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
+    formData.append('filename', filename);
+    
+    fetch('/api/print-pdf', { method: 'POST', body: formData })
+        .then(response => response.blob())
+        .then(pdfBlob => {
+            // Download PDF
+            const url = URL.createObjectURL(pdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename + '.pdf';
+            a.click();
+            callback({ status: 'ok' });
+        })
+        .catch(err => callback({ status: 'err' }));
+};
+```
+
+SERVER-SIDE PDF CONVERSION (/api/print-pdf):
+--------------------------------------------
+
+```javascript
+// In server.js
+async function handlePrintPdf(req, res) {
+    // 1. Extract pdf.bin and document.bin from multipart form
+    // 2. Write to x2t virtual filesystem
+    // 3. Create conversion params with outputformat: 513 (PDF)
+    // 4. Run x2t conversion
+    // 5. Read output PDF and return to client
+}
+```
+
+================================================================================
+                     8. DOCUMENT CONVERSION (x2t-wasm)
 ================================================================================
 
 x2t is OnlyOffice's document converter. The WASM version runs in Node.js.
@@ -384,7 +624,7 @@ FORMAT CODES (outputformat parameter):
 - 513: PDF
 
 ================================================================================
-                         7. IMAGE HANDLING
+                         9. IMAGE HANDLING
 ================================================================================
 
 Images are handled in three scenarios:
@@ -451,7 +691,193 @@ C. INSERTING IMAGES FROM URL
 5. We call successCallback with the data URL
 
 ================================================================================
-                   8. INTEGRATING WITH YOUR FILE SYSTEM
+                     10. SUPPORTED FILE FORMATS
+================================================================================
+
+The editor supports opening and converting many document formats via x2t-wasm.
+
+WORD PROCESSING DOCUMENTS:
+--------------------------
+
+| Extension | Format Name                  | Open | Save | Notes                    |
+|-----------|------------------------------|------|------|--------------------------|
+| .docx     | Microsoft Word 2007+         | ✓    | ✓    | Primary format           |
+| .doc      | Microsoft Word 97-2003       | ✓    | ✓    | Legacy binary format     |
+| .odt      | OpenDocument Text            | ✓    | ✓    | LibreOffice format       |
+| .rtf      | Rich Text Format             | ✓    | ✓    | Universal rich text      |
+| .txt      | Plain Text                   | ✓    | ✓    | UTF-8 encoded            |
+| .html     | HTML Document                | ✓    | ✓    | Web page format          |
+| .htm      | HTML Document                | ✓    | ✓    | Same as .html            |
+| .md       | Markdown                     | ✓    | -    | Converted to rich text   |
+| .pdf      | PDF (for editing)            | ✓    | ✓    | Converted to editable    |
+
+SPREADSHEET DOCUMENTS:
+----------------------
+
+| Extension | Format Name                  | Open | Save | Notes                    |
+|-----------|------------------------------|------|------|--------------------------|
+| .xlsx     | Microsoft Excel 2007+        | ✓    | ✓    | Primary format           |
+| .xls      | Microsoft Excel 97-2003      | ✓    | ✓    | Legacy binary format     |
+| .ods      | OpenDocument Spreadsheet     | ✓    | ✓    | LibreOffice format       |
+| .csv      | Comma-Separated Values       | ✓    | ✓    | Plain text data          |
+
+PRESENTATION DOCUMENTS:
+-----------------------
+
+| Extension | Format Name                  | Open | Save | Notes                    |
+|-----------|------------------------------|------|------|--------------------------|
+| .pptx     | Microsoft PowerPoint 2007+   | ✓    | ✓    | Primary format           |
+| .ppt      | Microsoft PowerPoint 97-2003 | ✓    | ✓    | Legacy binary format     |
+| .odp      | OpenDocument Presentation    | ✓    | ✓    | LibreOffice format       |
+
+EXPORT FORMATS (All document types):
+------------------------------------
+
+| Extension | Format Name                  | Notes                          |
+|-----------|------------------------------|--------------------------------|
+| .pdf      | PDF Document                 | Export to PDF from any editor  |
+
+FORMAT DETECTION CODE (public/index.html):
+------------------------------------------
+
+```javascript
+const typeMap = {
+    // Word documents
+    'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
+    'txt': 'word', 'html': 'word', 'htm': 'word', 'md': 'word',
+    
+    // Spreadsheets
+    'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
+    
+    // Presentations
+    'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide',
+    
+    // PDF (opens as word for editing)
+    'pdf': 'pdf'
+};
+```
+
+X2T FORMAT CODES:
+-----------------
+
+These codes are used in x2t conversion parameters:
+
+- 65: DOCX (Word)
+- 257: XLSX (Excel)
+- 129: PPTX (PowerPoint)
+- 513: PDF (Export only)
+- Internal formats: DOCY, XLSY, PPTY (base64-encoded binary)
+
+================================================================================
+              11. CRYPTPAD-PATCHED ONLYOFFICE (APP HOOKS)
+================================================================================
+
+The CryptPad-patched OnlyOffice communicates with the parent window via
+window.parent.APP hooks. These must be implemented for the editor to work.
+
+REQUIRED APP HOOKS:
+-------------------
+
+1. APP.getImageURL(name, callback)
+   Called when editor needs an image URL.
+   Return: Promise resolving to the image URL (data: or http:)
+
+2. APP.UploadImageFiles(files, type, id, jwt, callback)
+   Called when user pastes or drags images into editor.
+   Process the files and call callback when done.
+
+3. APP.AddImage(successCallback, errorCallback)
+   Called when user clicks "Insert Image" button.
+   Open file picker and return selected image via successCallback.
+
+4. APP.AddImageUrl(url, successCallback, errorCallback)
+   Called when user inserts image from URL.
+   Load the image and return via successCallback.
+
+5. APP.printPdf(dataContainer, callback)
+   Called when user exports to PDF.
+   dataContainer.data contains pdf.bin binary data.
+   Send to server for conversion and trigger download.
+
+6. APP.changeTheme(indexTheme)
+   Called when user changes presentation design theme.
+   Used for collaborative theme syncing (we just log and allow).
+
+7. APP.onFastChange(isFast)
+   Called when editor switches between fast/strict collaborative mode.
+   We always force fast mode to prevent lock visualization.
+
+COMPLETE APP IMPLEMENTATION (public/index.html):
+------------------------------------------------
+
+```javascript
+// Ensure APP exists
+window.APP = window.APP || {};
+
+// Image loading from cache
+window.APP.getImageURL = function(name) {
+    if (currentDocumentImages[name]) {
+        return Promise.resolve(currentDocumentImages[name]);
+    }
+    return Promise.resolve('/onlyoffice/v8/web-apps/apps/.../main/' + name);
+};
+
+// Image upload from clipboard/drag
+window.APP.UploadImageFiles = function(files, type, id, jwt, cb) {
+    // Process files as ArrayBuffer -> Blob -> data URL
+    // Store in currentDocumentImages
+    // Call cb() when done
+};
+
+// Image insert from file picker
+window.APP.AddImage = function(successCallback, errorCallback) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = function() {
+        // Read file, create data URL, store in cache
+        successCallback({ name: imageName, url: dataUrl });
+    };
+    input.click();
+};
+
+// Image insert from URL
+window.APP.AddImageUrl = function(url, successCallback, errorCallback) {
+    // Load image via new Image() or fetch
+    // Convert to data URL via canvas
+    successCallback({ name: imageName, url: dataUrl });
+};
+
+// PDF export
+window.APP.printPdf = function(dataContainer, callback) {
+    // Send dataContainer.data to /api/print-pdf
+    // Download resulting PDF
+    callback({ status: 'ok' });
+};
+
+// Theme change (presentations)
+window.APP.changeTheme = function(indexTheme) {
+    console.log('[changeTheme] Theme change:', indexTheme);
+    // Allow theme change to proceed
+};
+
+// Fast mode control
+window.APP.onFastChange = function(isFast) {
+    window.APP.isFast = true;  // Always stay in fast mode
+};
+window.APP.isFast = true;  // Start in fast mode
+```
+
+WHERE THESE ARE CALLED (OnlyOffice SDK):
+----------------------------------------
+
+- sdkjs/word/sdk-all.js: Contains lock visualization code
+- sdkjs/slide/sdk-all.js: Contains changeTheme hook
+- web-apps/apps/*/main/app.js: Contains image handling hooks
+- CryptPad inner.js: Contains collaborative editing hooks
+
+================================================================================
+                  12. INTEGRATING WITH YOUR FILE SYSTEM
 ================================================================================
 
 To integrate this editor with your own file storage system:
@@ -540,7 +966,7 @@ The mock server's message format is compatible with this - you'd just route
 messages through WebSocket instead of handling locally.
 
 ================================================================================
-                          9. API ENDPOINTS
+                          13. API ENDPOINTS
 ================================================================================
 
 POST /api/open
@@ -630,7 +1056,7 @@ Download converted file.
 Response: Raw file bytes with appropriate Content-Type
 
 ================================================================================
-                      10. CUSTOMIZATION & EXTENSION
+                      14. CUSTOMIZATION & EXTENSION
 ================================================================================
 
 A. CHANGING EDITOR APPEARANCE
@@ -706,7 +1132,7 @@ const typeMap = {
 ```
 
 ================================================================================
-                         11. TROUBLESHOOTING
+                         15. TROUBLESHOOTING
 ================================================================================
 
 ISSUE: "File content does not match file extension" error
@@ -768,6 +1194,35 @@ Solution: Add to your CSS:
 }
 ```
 
+ISSUE: Red "Guest" labels appear / Controls lock when typing
+------------------------------------------------------------
+Cause: Lock mechanism not properly disabled in single-user mode.
+Solution:
+1. Ensure connectMockServerFast is used (not connectMockServer)
+2. Check that getLock response includes the current user ID
+3. Verify APP.onFastChange is set to always return true
+4. Check that disableLockMechanism() is being called after iframe loads
+5. Ensure GLOBAL_USER_ID is consistent between config and mock server
+
+ISSUE: Changing presentation theme causes error
+-----------------------------------------------
+Cause: APP.changeTheme function not defined.
+Solution: Add to window.APP:
+```javascript
+window.APP.changeTheme = function(indexTheme) {
+    console.log('[changeTheme] Theme change:', indexTheme);
+};
+```
+
+ISSUE: PDF export not working
+-----------------------------
+Cause: APP.printPdf not handling the pdf.bin data correctly.
+Solution:
+1. Check that dataContainer.data exists and has length
+2. Verify /api/print-pdf endpoint is working
+3. Check server logs for x2t conversion errors
+4. Ensure both pdf.bin and document.bin are being sent
+
 ================================================================================
                               QUICK REFERENCE
 ================================================================================
@@ -776,21 +1231,119 @@ Start server:           node server.js
 Server URL:             http://localhost:8080
 Editor page:            http://localhost:8080/
 
-Document formats:       DOCY (Word), XLSY (Excel), PPTY (PowerPoint)
+URL PARAMETERS:
+---------------
+Create new document:    http://localhost:8080/?f=filename.docx
+                        http://localhost:8080/?f=filename.xlsx
+                        http://localhost:8080/?f=filename.pptx
+Enable co-editing:      http://localhost:8080/?coedit=true
+Combined:               http://localhost:8080/?f=Report.docx&coedit=true
+
+DOCUMENT FORMATS:
+-----------------
+Internal formats:       DOCY (Word), XLSY (Excel), PPTY (PowerPoint)
 Template location:      public/templates/
 OnlyOffice assets:      public/onlyoffice/v8/
 
-Key functions:
+SUPPORTED INPUT FORMATS:
+------------------------
+Word:    docx, doc, odt, rtf, txt, html, htm, md, pdf
+Excel:   xlsx, xls, ods, csv
+PPT:     pptx, ppt, odp
+
+KEY FUNCTIONS (public/index.html):
+----------------------------------
 - createDocument(type)              Create new document
 - openFile(event)                   Open file from picker
 - createEditorForOpenedFile(...)    Initialize editor with document
-- connectMockServer(editor, ...)    Connect mock server to editor
+- connectMockServer(editor, ...)    Full mock server (co-editing)
+- connectMockServerFast(editor,...) Fast mock server (single-user)
 - downloadDocument()                Export/download document
+- disableLockMechanism(iframeWin)   Patch iframe to disable locks
 
-Key objects:
+KEY OBJECTS:
+------------
 - editor                            DocsAPI.DocEditor instance
 - currentDocumentImages             Image cache (name -> data URL)
 - EmptyDocTemplates                 Template cache (type -> template string)
+- GLOBAL_USER_ID                    Consistent user ID for lock handling
+
+WINDOW.APP HOOKS:
+-----------------
+- APP.getImageURL                   Return image URL by name
+- APP.UploadImageFiles              Handle pasted/dropped images
+- APP.AddImage                      Handle "Insert Image" from file
+- APP.AddImageUrl                   Handle "Insert Image from URL"
+- APP.printPdf                      Handle PDF export
+- APP.changeTheme                   Handle presentation theme change
+- APP.onFastChange                  Control fast/strict mode
+- APP.isFast                        Fast mode flag (always true)
+
+API ENDPOINTS:
+--------------
+POST /api/open                      Convert document to internal format
+POST /api/print-pdf                 Convert pdf.bin to PDF
+POST /onlyoffice/v8/downloadas/*    Convert internal to Office format
+GET  /api/fetch-image               Proxy external images (CORS)
+GET  /api/latest-download           Poll for download completion
+GET  /downloads/{id}/{filename}     Download converted file
+
+================================================================================
+                           CHANGE HISTORY
+================================================================================
+
+CHANGES FROM INITIAL COMMIT:
+----------------------------
+
+1. CO-EDITING / LOCK MECHANISM:
+   - Added connectMockServerFast() for single-user mode
+   - Fixed lock handling to prevent red "Guest" indicators
+   - Added disableLockMechanism() to patch iframe internals
+   - Made co-editing opt-in via ?coedit=true URL parameter
+   - Added GLOBAL_USER_ID for consistent user identification
+
+2. PDF EXPORT:
+   - Implemented APP.printPdf hook
+   - Added /api/print-pdf server endpoint
+   - PDF export works for Word, Excel, and PowerPoint
+
+3. PRESENTATION THEMES:
+   - Added APP.changeTheme hook
+   - Allows changing design themes without errors
+
+4. ADDITIONAL FILE FORMATS:
+   - Added support for: doc, xls, ppt (legacy Office)
+   - Added support for: odt, ods, odp (OpenDocument)
+   - Added support for: rtf, txt, html, htm, md
+   - Added support for: csv (spreadsheet data)
+   - Added PDF opening (converts to editable Word)
+
+5. IMAGE HANDLING:
+   - Fixed APP.AddImage for file picker
+   - Fixed APP.AddImageUrl for URL-based images
+   - Fixed APP.UploadImageFiles for paste/drag
+   - Added CORS proxy via /api/fetch-image
+
+6. URL PARAMETER FOR NEW DOCUMENTS:
+   - Added ?f=filename.ext parameter to create new documents
+   - Supports all document types: docx, xlsx, pptx, doc, xls, ppt, etc.
+   - Auto-detects document type from extension
+   - Sets filename automatically from URL
+   - Can combine with ?coedit=true
+
+FILES MODIFIED:
+---------------
+- public/index.html       Main application (extensive changes)
+- server.js               Added PDF conversion, file format support
+- DEVELOPER_GUIDE.txt     This documentation
+
+ONLYOFFICE SDK FILES (NOT MODIFIED - CRYPTPAD PATCH):
+------------------------------------------------------
+These are pre-patched by CryptPad, we don't modify them:
+- public/onlyoffice/v8/sdkjs/word/sdk-all.js
+- public/onlyoffice/v8/sdkjs/cell/sdk-all.js
+- public/onlyoffice/v8/sdkjs/slide/sdk-all.js
+- public/onlyoffice/v8/web-apps/apps/*/main/app.js
 
 ================================================================================
                                    END

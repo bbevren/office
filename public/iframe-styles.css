@@ -1,0 +1,88 @@
+/**
+ * Custom styles for OnlyOffice editor iframe
+ * These styles are injected into the editor iframe to override default styling
+ * 
+ * Edit this file to customize the editor appearance without modifying OnlyOffice core files
+ */
+
+/* ========== TOOLBAR CUSTOMIZATION ========== */
+
+/* Change toolbar header color (document = blue, spreadsheet = green, presentation = orange) */
+/*
+.toolbar-header-document { background: #446995 !important; }
+.toolbar-header-spreadsheet { background: #40865c !important; }
+.toolbar-header-presentation { background: #aa5252 !important; }
+*/
+
+/* Hide specific toolbar buttons (uncomment to hide) */
+/*
+#slot-btn-print { display: none !important; }
+#slot-btn-save { display: none !important; }
+*/
+
+/* ========== CANVAS/EDITOR AREA ========== */
+
+/* Editor canvas background */
+/*
+#editor_sdk { background: #f0f0f0 !important; }
+*/
+
+/* Page/document area */
+/*
+.page { box-shadow: 0 2px 10px rgba(0,0,0,0.1) !important; }
+*/
+
+/* ========== SIDEBAR/PANELS ========== */
+
+/* Right sidebar panels */
+/*
+.right-panel { background: #fff !important; }
+*/
+
+/* ========== STATUS BAR ========== */
+
+/* Bottom status bar */
+/*
+.statusbar { background: #f4f4f4 !important; }
+*/
+
+/* ========== DIALOGS/MODALS ========== */
+
+/* Modal dialog styling */
+/*
+.asc-window { border-radius: 8px !important; }
+*/
+
+/* ========== CUSTOM BRANDING ========== */
+
+/* Hide OnlyOffice logo (if present) */
+/*
+.brand-logo, .logo { display: none !important; }
+*/
+
+/* ========== DARK THEME ADJUSTMENTS ========== */
+
+/* Dark theme overrides */
+/*
+.content-theme-dark {
+    --canvas-background: #2d2d2d;
+    --toolbar-header-document: #3a5a8a;
+}
+*/
+
+/* ========== RESPONSIVE ADJUSTMENTS ========== */
+
+/* Mobile/tablet adjustments */
+/*
+@media (max-width: 768px) {
+    .toolbar { padding: 5px !important; }
+}
+*/
+
+/* ========== PRINT STYLES ========== */
+
+@media print {
+    .toolbar, .statusbar, .left-panel, .right-panel {
+        display: none !important;
+    }
+}

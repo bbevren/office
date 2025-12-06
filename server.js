@@ -1,8 +1,72 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+const os = require('os');
 
 const PORT = 8080;
+
+// Simple Markdown to HTML converter (no dependencies)
+// Handles: headings, bold, italic, code blocks, lists, links, images, blockquotes, horizontal rules
+function convertMarkdownToHtml(md) {
+    let html = md;
+    
+    // Escape HTML entities first (except for our own conversions)
+    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // Code blocks (fenced with ```)
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+    
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // Headers (h1-h6)
+    html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+    html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+    html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    
+    // Bold and italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+    html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+    
+    // Strikethrough
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    
+    // Images ![alt](url)
+    html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
+    
+    // Links [text](url)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    
+    // Blockquotes
+    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    
+    // Horizontal rules
+    html = html.replace(/^(---|\*\*\*|___)$/gm, '<hr>');
+    
+    // Unordered lists
+    html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    
+    // Ordered lists
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    
+    // Paragraphs - wrap remaining text blocks
+    html = html.replace(/^(?!<[a-z]|$)(.+)$/gm, '<p>$1</p>');
+    
+    // Clean up empty paragraphs and fix nested issues
+    html = html.replace(/<p><\/p>/g, '');
+    
+    return html;
+}
 
 // Load x2t converter
 let x2t = null;
@@ -24,11 +88,13 @@ try {
 
 const MIME_TYPES = {
     '.html': 'text/html',
+    '.htm': 'text/html',
     '.js': 'text/javascript',
     '.css': 'text/css',
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
     '.svg': 'image/svg+xml',
     '.ico': 'image/x-icon',
@@ -36,7 +102,22 @@ const MIME_TYPES = {
     '.woff': 'font/woff',
     '.woff2': 'font/woff2',
     '.ttf': 'font/ttf',
-    '.eot': 'application/vnd.ms-fontobject'
+    '.eot': 'application/vnd.ms-fontobject',
+    // Document formats for samples
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.md': 'text/markdown',
+    '.rtf': 'application/rtf',
+    '.odt': 'application/vnd.oasis.opendocument.text',
+    '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+    '.odp': 'application/vnd.oasis.opendocument.presentation'
 };
 
 const server = http.createServer((req, res) => {
@@ -86,6 +167,13 @@ const server = http.createServer((req, res) => {
         return;
     }
     
+    // Handle PDF generation with pdf.bin (POST /api/print-pdf)
+    // This is called by APP.printPdf when OnlyOffice generates PDF
+    if (req.method === 'POST' && pathname === '/api/print-pdf') {
+        handlePrintPdf(req, res);
+        return;
+    }
+    
     // Handle polling for latest download
     if (req.method === 'GET' && pathname === '/api/latest-download') {
         const latest = global.latestDownload;
@@ -132,7 +220,11 @@ const server = http.createServer((req, res) => {
     // Handle root
     if (pathname === '/') {
         filePath = path.join(__dirname, 'public', 'index.html');
-    } 
+    }
+    // Handle sample files (GET /samples/*)
+    else if (pathname.startsWith('/samples/')) {
+        filePath = path.join(__dirname, pathname);
+    }
     // Handle all public files
     else {
         filePath = path.join(__dirname, 'public', pathname);
@@ -379,6 +471,103 @@ function handleDownload(req, res, urlObj) {
 }
 
 // Handle file open conversion - converts DOCX/XLSX/PPTX to internal binary format
+// Convert legacy formats (doc, xls, ppt, rtf, csv) using child process
+// Uses TWO separate child processes because x2t WASM corrupts after legacy conversion
+async function convertLegacyFormat(inputBuffer, inputExt) {
+    const tmpDir = os.tmpdir();
+    const timestamp = Date.now() + '_' + Math.random().toString(36).substring(7);
+    const inputFile = path.join(tmpDir, `input_${timestamp}.${inputExt}`);
+    // Map legacy, ODF, and other formats to their OOXML equivalents for 2-step conversion
+    const modernExtMap = { 
+        doc: 'docx', xls: 'xlsx', ppt: 'pptx', rtf: 'docx',
+        csv: 'xlsx'  // CSV needs to go through XLSX
+    };
+    const modernExt = modernExtMap[inputExt];
+    
+    const intermediateFile = path.join(tmpDir, `intermediate_${timestamp}.${modernExt}`);
+    const outputFile = path.join(tmpDir, `output_${timestamp}.bin`);
+    const imagesFile = outputFile + '.images.json';
+    
+    try {
+        // Write input file
+        fs.writeFileSync(inputFile, inputBuffer);
+        console.log('[LegacyConvert] Input file:', inputFile);
+        
+        // STEP 1: Convert legacy -> OOXML format (in child process #1)
+        console.log('[LegacyConvert] Step 1:', inputExt, '->', modernExt);
+        let stdout1 = '', stderr1 = '';
+        try {
+            stdout1 = execSync(
+                `node convert-legacy.js "${inputFile}" ${inputExt} "${intermediateFile}" ${modernExt}`,
+                { cwd: __dirname, timeout: 120000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+        } catch (execErr) {
+            stdout1 = execErr.stdout ? execErr.stdout.toString() : '';
+            stderr1 = execErr.stderr ? execErr.stderr.toString() : '';
+            console.log('[LegacyConvert] Step 1 child exit code:', execErr.status);
+        }
+        if (stderr1) console.log('[LegacyConvert] Step 1 log:', stderr1.trim());
+        if (stdout1) console.log('[LegacyConvert] Step 1 result:', stdout1.trim());
+        
+        if (!fs.existsSync(intermediateFile)) {
+            throw new Error('Step 1 failed - no intermediate file');
+        }
+        console.log('[LegacyConvert] Intermediate file size:', fs.statSync(intermediateFile).size);
+        
+        // STEP 2: Convert modern -> bin (in child process #2 - fresh x2t instance)
+        console.log('[LegacyConvert] Step 2:', modernExt, '-> bin');
+        let stdout2 = '', stderr2 = '';
+        try {
+            stdout2 = execSync(
+                `node convert-legacy.js "${intermediateFile}" ${modernExt} "${outputFile}" bin`,
+                { cwd: __dirname, timeout: 120000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+        } catch (execErr) {
+            stdout2 = execErr.stdout ? execErr.stdout.toString() : '';
+            stderr2 = execErr.stderr ? execErr.stderr.toString() : '';
+            console.log('[LegacyConvert] Step 2 child exit code:', execErr.status);
+        }
+        if (stderr2) console.log('[LegacyConvert] Step 2 log:', stderr2.trim());
+        if (stdout2) console.log('[LegacyConvert] Step 2 result:', stdout2.trim());
+        
+        if (!fs.existsSync(outputFile)) {
+            throw new Error('Step 2 failed - no output file');
+        }
+        
+        // Read output binary
+        const outputData = fs.readFileSync(outputFile, 'utf8');
+        console.log('[LegacyConvert] Output binary size:', outputData.length);
+        
+        // Read images if available
+        let imageDataUrls = {};
+        if (fs.existsSync(imagesFile)) {
+            try {
+                imageDataUrls = JSON.parse(fs.readFileSync(imagesFile, 'utf8'));
+                console.log('[LegacyConvert] Loaded', Object.keys(imageDataUrls).length, 'images');
+            } catch (e) {
+                console.log('[LegacyConvert] Failed to load images:', e.message);
+            }
+        }
+        
+        console.log('[LegacyConvert] Success!');
+        
+        return {
+            success: true,
+            data: outputData,
+            size: outputData.length,
+            format: 'cryptpad',
+            images: imageDataUrls
+        };
+        
+    } finally {
+        // Cleanup temp files
+        try { fs.unlinkSync(inputFile); } catch(e) {}
+        try { fs.unlinkSync(intermediateFile); } catch(e) {}
+        try { fs.unlinkSync(outputFile); } catch(e) {}
+        try { fs.unlinkSync(imagesFile); } catch(e) {}
+    }
+}
+
 function handleOpenConvert(req, res) {
     const chunks = [];
     console.log('[OpenConvert] Handler invoked');
@@ -395,10 +584,61 @@ function handleOpenConvert(req, res) {
                 return;
             }
             
-            // Get file extension from Content-Type or X-File-Extension header
-            const fileExt = req.headers['x-file-extension'] || 'docx';
+            // Get file extension from X-File-Extension header
+            let fileExt = (req.headers['x-file-extension'] || 'docx').toLowerCase();
             console.log('[OpenConvert] File extension:', fileExt);
             
+            // Define supported formats
+            // OOXML formats use main x2t (most stable)
+            const ooxmlFormats = ['docx', 'xlsx', 'pptx'];
+            // Text-based formats use main x2t
+            const textFormats = ['txt', 'html', 'md'];
+            // ODS works directly
+            const workingOdfFormats = ['ods'];
+            // Legacy formats need 2-step child process conversion
+            const legacyFormats = ['doc', 'xls', 'ppt', 'rtf'];
+            // CSV needs 2-step conversion (CSV -> XLSX -> BIN)
+            const csvFormats = ['csv'];
+            // Formats with known x2t-wasm bugs (xmlHashFree null pointer)
+            const brokenFormats = ['odt', 'odp'];
+            
+            const mainProcessFormats = [...ooxmlFormats, ...textFormats, ...workingOdfFormats];
+            const twoStepFormats = [...legacyFormats, ...csvFormats];
+            const allFormats = [...mainProcessFormats, ...twoStepFormats];
+            
+            // Check for broken formats first
+            if (brokenFormats.includes(fileExt)) {
+                console.log('[OpenConvert] Unsupported format (x2t-wasm bug):', fileExt);
+                res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ 
+                    error: `Cannot open .${fileExt} files - this format has a known bug in the x2t-wasm converter.\n\nPlease convert to a different format first:\n• For .odt → save as .docx\n• For .odp → save as .pptx\n\nYou can use LibreOffice or Google Docs to convert.`
+                }));
+                return;
+            }
+            
+            if (!allFormats.includes(fileExt)) {
+                console.log('[OpenConvert] Unsupported format:', fileExt);
+                res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: `Unsupported format: ${fileExt}. Supported: ${allFormats.join(', ')}` }));
+                return;
+            }
+            
+            // Legacy formats need 2-step child process conversion
+            if (twoStepFormats.includes(fileExt)) {
+                console.log('[OpenConvert] Legacy format detected, using child process converter');
+                try {
+                    const result = await convertLegacyFormat(body, fileExt);
+                    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                    res.end(JSON.stringify(result));
+                } catch (err) {
+                    console.error('[OpenConvert] Legacy conversion error:', err);
+                    res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                    res.end(JSON.stringify({ error: err.message || 'Conversion failed' }));
+                }
+                return;
+            }
+            
+            // Modern formats - direct conversion
             // Initialize working directory
             initWorkDir();
             
@@ -409,17 +649,30 @@ function handleOpenConvert(req, res) {
             const inputPath = `/working/input.${fileExt}`;
             const outputPath = '/working/output.bin';
             
-            x2t.FS.writeFile(inputPath, body);
+            // Handle Markdown files - convert to HTML first since x2t doesn't support .md directly
+            let actualInputPath = inputPath;
+            if (fileExt === 'md') {
+                const mdContent = body.toString('utf8');
+                const htmlContent = convertMarkdownToHtml(mdContent);
+                actualInputPath = '/working/input.html';
+                x2t.FS.writeFile(actualInputPath, Buffer.from(htmlContent, 'utf8'));
+                console.log('[OpenConvert] Converted Markdown to HTML:', htmlContent.length, 'chars');
+            } else {
+                x2t.FS.writeFile(inputPath, body);
+            }
             console.log('[OpenConvert] Written input file:', body.length, 'bytes');
             
             // Create conversion params - convert to internal binary format
+            // Includes encoding params for TXT and CSV files
             const params = `<?xml version="1.0" encoding="utf-8"?>
 <TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <m_sFontDir>/working/fonts/</m_sFontDir>
-  <m_sThemeDir>/working/themes</m_sThemeDir>
-  <m_sFileFrom>${inputPath}</m_sFileFrom>
+  <m_sThemeDir>/working/themes/</m_sThemeDir>
+  <m_sFileFrom>${actualInputPath}</m_sFileFrom>
   <m_sFileTo>${outputPath}</m_sFileTo>
   <m_bIsNoBase64>false</m_bIsNoBase64>
+  <m_nCsvTxtEncoding>46</m_nCsvTxtEncoding>
+  <m_nCsvDelimiter>4</m_nCsvDelimiter>
 </TaskQueueDataConvert>`;
             
             x2t.FS.writeFile('/working/params.xml', params);
@@ -618,10 +871,20 @@ function handleFetchImage(req, res, urlObj) {
 }
 
 // Initialize working directory in the wasm filesystem
+// Also load fonts for PDF text rendering
+let fontsLoaded = false;
+
 function initWorkDir() {
+    // Clean up working directory but preserve fonts
     try {
-        if (x2t.FS.analyzePath('/working').exists) {
-            removeRecursive(x2t.FS, '/working');
+        // Remove media files
+        if (x2t.FS.analyzePath('/working/media').exists) {
+            removeRecursive(x2t.FS, '/working/media');
+        }
+        // Remove any output/input files
+        const workingFiles = x2t.FS.readdir('/working').filter(f => f !== '.' && f !== '..' && f !== 'fonts' && f !== 'themes');
+        for (const file of workingFiles) {
+            try { x2t.FS.unlink('/working/' + file); } catch (e) {}
         }
     } catch (e) {}
     
@@ -629,6 +892,47 @@ function initWorkDir() {
     try { x2t.FS.mkdir('/working/media'); } catch (e) {}
     try { x2t.FS.mkdir('/working/fonts'); } catch (e) {}
     try { x2t.FS.mkdir('/working/themes'); } catch (e) {}
+    
+    // Load fonts if not already loaded (fonts are persistent across conversions)
+    if (!fontsLoaded) {
+        loadFontsToWasm();
+    }
+}
+
+// Load font files into the WASM filesystem for PDF text rendering
+function loadFontsToWasm() {
+    const fontsDir = path.join(__dirname, 'public', 'onlyoffice', 'v8', 'fonts', 'fonts');
+    
+    try {
+        if (!fs.existsSync(fontsDir)) {
+            console.log('[Fonts] Fonts directory not found:', fontsDir);
+            return;
+        }
+        
+        const fontFiles = fs.readdirSync(fontsDir).filter(f => 
+            f.endsWith('.ttf') || f.endsWith('.otf')
+        );
+        
+        console.log('[Fonts] Loading', fontFiles.length, 'font files...');
+        
+        let loaded = 0;
+        for (const fontFile of fontFiles) {
+            try {
+                const fontPath = path.join(fontsDir, fontFile);
+                const fontData = fs.readFileSync(fontPath);
+                x2t.FS.writeFile('/working/fonts/' + fontFile, fontData);
+                loaded++;
+            } catch (e) {
+                // Skip individual font errors
+            }
+        }
+        
+        console.log('[Fonts] Loaded', loaded, 'fonts into WASM filesystem');
+        fontsLoaded = true;
+        
+    } catch (err) {
+        console.error('[Fonts] Error loading fonts:', err.message);
+    }
 }
 
 // Remove directory recursively
@@ -820,6 +1124,138 @@ async function handleDirectConvert(req, res) {
 }
 
 // Simple multipart form parser
+// Handle PDF generation with pdf.bin from OnlyOffice
+// This receives the pdf.bin (rendering buffer) and optionally document.bin
+// The pdf.bin from OnlyOffice may already be PDF data or a rendering buffer for x2t
+async function handlePrintPdf(req, res) {
+    console.log('[PrintPdf] Handler invoked');
+    
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', async () => {
+        try {
+            const body = Buffer.concat(chunks);
+            console.log('[PrintPdf] Received', body.length, 'bytes');
+            
+            // Parse multipart form data
+            const contentType = req.headers['content-type'] || '';
+            const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+            if (!boundaryMatch) {
+                throw new Error('No boundary in content-type');
+            }
+            
+            const boundary = boundaryMatch[1];
+            const parts = parseMultipart(body, boundary);
+            
+            console.log('[PrintPdf] Parsed parts:', Object.keys(parts));
+            
+            const docBin = parts.docbin;
+            const pdfBin = parts.pdfbin;
+            const filename = parts.filename || 'document';
+            
+            if (!pdfBin) {
+                throw new Error('Missing pdfbin');
+            }
+            
+            console.log('[PrintPdf] pdfbin:', pdfBin.length, 'bytes');
+            if (docBin) {
+                console.log('[PrintPdf] docbin:', docBin.length, 'bytes');
+            }
+            
+            // Check if pdfBin is already a valid PDF (starts with %PDF)
+            const pdfHeader = pdfBin.slice(0, 4).toString('utf8');
+            console.log('[PrintPdf] pdfbin header:', pdfHeader);
+            
+            if (pdfHeader === '%PDF') {
+                // The pdfBin is already a complete PDF! Just send it
+                console.log('[PrintPdf] pdfbin is already a complete PDF, sending directly');
+                res.writeHead(200, {
+                    'Content-Type': 'application/pdf',
+                    'Content-Disposition': `attachment; filename="${filename}.pdf"`,
+                    'Access-Control-Allow-Origin': '*'
+                });
+                res.end(pdfBin);
+                return;
+            }
+            
+            // Otherwise, we need to use x2t to convert
+            if (!x2tReady) {
+                throw new Error('Converter not ready');
+            }
+            
+            if (!docBin) {
+                throw new Error('Need docbin for x2t conversion (pdfbin is not a complete PDF)');
+            }
+            
+            // Initialize working directory
+            initWorkDir();
+            
+            // Write both files to WASM filesystem
+            x2t.FS.writeFile('/working/input.bin', docBin);
+            x2t.FS.writeFile('/working/pdf.bin', pdfBin);
+            
+            // Write cached images to WASM filesystem for PDF embedding
+            // Images are stored as data URLs in global.imageCache during document open
+            if (global.imageCache && Object.keys(global.imageCache).length > 0) {
+                try {
+                    x2t.FS.mkdir('/working/media');
+                } catch (e) {}
+                for (const [name, imgData] of Object.entries(global.imageCache)) {
+                    try {
+                        x2t.FS.writeFile(`/working/media/${name}`, imgData.data);
+                        console.log('[PrintPdf] Written image:', name, imgData.data.length, 'bytes');
+                    } catch (e) {
+                        console.log('[PrintPdf] Failed to write image:', name, e.message);
+                    }
+                }
+            }
+            
+            console.log('[PrintPdf] Written files to WASM FS');
+            
+            // Create conversion params for PDF output
+            const params = `<?xml version="1.0" encoding="utf-8"?>
+<TaskQueueDataConvert xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <m_sFontDir>/working/fonts/</m_sFontDir>
+  <m_sThemeDir>/working/themes</m_sThemeDir>
+  <m_sFileFrom>/working/input.bin</m_sFileFrom>
+  <m_sFileTo>/working/output.pdf</m_sFileTo>
+  <m_bIsNoBase64>false</m_bIsNoBase64>
+</TaskQueueDataConvert>`;
+            
+            x2t.FS.writeFile('/working/params.xml', params);
+            
+            console.log('[PrintPdf] Running x2t conversion...');
+            const result = x2t.ccall("main1", "number", ["string"], ["/working/params.xml"]);
+            
+            console.log('[PrintPdf] x2t result:', result);
+            
+            if (result !== 0) {
+                throw new Error('PDF conversion failed with code: ' + result);
+            }
+            
+            // Read output PDF
+            const pdfData = x2t.FS.readFile('/working/output.pdf');
+            console.log('[PrintPdf] Generated PDF:', pdfData.length, 'bytes');
+            
+            // Send PDF back
+            res.writeHead(200, {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': `attachment; filename="${filename}.pdf"`,
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(Buffer.from(pdfData));
+            
+        } catch (err) {
+            console.error('[PrintPdf] Error:', err);
+            res.writeHead(500, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify({ error: err.message }));
+        }
+    });
+}
+
 function parseMultipart(body, boundary) {
     const result = {};
     const boundaryBuffer = Buffer.from('--' + boundary);

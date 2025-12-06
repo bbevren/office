@@ -111,7 +111,7 @@
         <span style="margin: 0 10px; color: #ccc;">|</span>
         <input type="text" id="filename" placeholder="Document name" value="Untitled">
         <button onclick="document.getElementById('fileInput').click()">📂 Open</button>
-        <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.odt,.ods,.odp" onchange="openFile(event)">
+        <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.ods,.doc,.xls,.ppt,.rtf,.csv,.txt,.md,.html,.htm" onchange="openFile(event)">
         <!-- Download via File menu > Download as -->
     </div>
     
@@ -331,6 +331,304 @@
 
         // Load templates on page load
         loadTemplates();
+
+        // ========== CO-EDITING CONFIGURATION ==========
+        // Enable collaborative editing via URL parameter: ?coedit=true
+        // When disabled (default), editor runs in fast single-user mode with no lock checking
+        // When enabled, MockServer handles locks for future custom server integration
+        const urlParamsGlobal = new URLSearchParams(window.location.search);
+        const coEditEnabled = urlParamsGlobal.get('coedit') === 'true';
+        console.log('[Config] Co-editing mode:', coEditEnabled ? 'ENABLED (lock-based)' : 'DISABLED (fast single-user)');
+
+        // CRITICAL: Use a single user ID across editor config and mock server
+        // This ensures lock ownership is correctly attributed to "us"
+        const GLOBAL_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+        console.log('[Config] Global user ID:', GLOBAL_USER_ID);
+
+        // ========== URL PARAMETER FILE OPENING ==========
+        // Support opening files via URL parameters: ?f=filename.docx or ?file=filename.docx
+        // Files are loaded from /samples/ directory or full URL
+        async function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fileParam = urlParams.get('f') || urlParams.get('file');
+            
+            if (fileParam) {
+                console.log('[URL Params] File parameter found:', fileParam);
+                await openFileFromUrl(fileParam);
+            }
+        }
+
+        // Open a file from URL parameter
+        async function openFileFromUrl(filename) {
+            try {
+                // Decode URI component in case it was encoded
+                const decodedFilename = decodeURIComponent(filename);
+                
+                // Determine the URL - if it's a full URL use it, otherwise use /samples/
+                let fileUrl;
+                if (decodedFilename.startsWith('http://') || decodedFilename.startsWith('https://') || decodedFilename.startsWith('/')) {
+                    fileUrl = decodedFilename;
+                } else {
+                    // Encode the filename for URL (handles spaces and special characters)
+                    fileUrl = '/samples/' + encodeURIComponent(decodedFilename);
+                }
+                
+                console.log('[URL Open] Fetching file:', fileUrl);
+                updateStatus(`Loading ${decodedFilename}...`);
+                
+                const response = await fetch(fileUrl);
+                if (!response.ok) {
+                    throw new Error(`File not found: ${response.status}`);
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                console.log('[URL Open] Fetched file:', arrayBuffer.byteLength, 'bytes');
+                
+                // Get extension from filename
+                const ext = filename.split('.').pop().toLowerCase();
+                const typeMap = {
+                    'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
+                    'txt': 'word', 'html': 'word', 'htm': 'word', 'md': 'word',
+                    'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
+                    'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
+                };
+                
+                const docType = typeMap[ext];
+                if (!docType) {
+                    throw new Error(`Unsupported file type: ${ext}`);
+                }
+                
+                // Set filename in input (without extension)
+                const baseName = filename.replace(/\.[^/.]+$/, '').split('/').pop();
+                document.getElementById('filename').value = baseName;
+                
+                // Destroy current editor
+                destroyEditor();
+                
+                // Show loading status
+                document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Converting document...</p></div>';
+                updateStatus(`Converting ${filename}...`);
+                
+                // Send to server for conversion
+                const convertResponse = await fetch('/api/open', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/octet-stream',
+                        'X-File-Extension': ext
+                    },
+                    body: arrayBuffer
+                });
+                
+                if (!convertResponse.ok) {
+                    throw new Error(`Server error: ${convertResponse.status}`);
+                }
+                
+                const result = await convertResponse.json();
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                console.log('[URL Open] Conversion successful, data length:', result.size, 'chars');
+                
+                // Create blob URL for the converted document
+                const docBlob = new Blob([result.data], { type: 'text/plain' });
+                const docUrl = URL.createObjectURL(docBlob);
+                
+                // Store image data URLs
+                currentDocumentImages = {};
+                if (result.images && typeof result.images === 'object') {
+                    for (const [name, dataUrl] of Object.entries(result.images)) {
+                        currentDocumentImages[name] = dataUrl;
+                    }
+                }
+                
+                window.pendingDocumentUrl = docUrl;
+                currentType = docType;
+                
+                // Create the editor
+                createEditorForOpenedFile(docType, baseName, ext, docUrl);
+                
+            } catch (err) {
+                console.error('[URL Open] Error:', err);
+                alert('Failed to open file from URL: ' + err.message);
+                destroyEditor();
+                document.getElementById('editor').innerHTML = '<div class="loading"><p style="color: #666;">Click a button above to create a new document</p></div>';
+                updateStatus('Failed to open file');
+            }
+        }
+
+        // Check URL params after templates are loaded
+        setTimeout(checkUrlParams, 500);
+
+        // ========== IFRAME CUSTOM STYLES INJECTION ==========
+        // Load and inject custom CSS into editor iframe
+        let customIframeStyles = null;
+        
+        async function loadCustomIframeStyles() {
+            try {
+                const response = await fetch('/iframe-styles.css');
+                if (response.ok) {
+                    customIframeStyles = await response.text();
+                    console.log('[Iframe Styles] Loaded custom styles:', customIframeStyles.length, 'chars');
+                }
+            } catch (e) {
+                console.log('[Iframe Styles] No custom styles file found');
+            }
+        }
+        
+        // Inject custom styles into iframe
+        function injectCustomStyles(iframeWindow) {
+            if (!customIframeStyles || !iframeWindow || !iframeWindow.document) return;
+            
+            try {
+                const doc = iframeWindow.document;
+                
+                // Check if already injected
+                if (doc.getElementById('custom-iframe-styles')) return;
+                
+                const style = doc.createElement('style');
+                style.id = 'custom-iframe-styles';
+                style.textContent = customIframeStyles;
+                doc.head.appendChild(style);
+                
+                console.log('[Iframe Styles] ✓ Custom styles injected into iframe');
+            } catch (e) {
+                console.log('[Iframe Styles] Failed to inject styles:', e.message);
+            }
+        }
+        
+        // Disable lock mechanism in the iframe's OnlyOffice editor
+        // This patches internal objects to prevent lock-based UI (red "Guest" labels)
+        function disableLockMechanism(iframeWindow) {
+            if (!iframeWindow) return;
+            
+            try {
+                console.log('[Lock Disable] Attempting to disable lock visualization...');
+                
+                // Try to find and patch the editor internals
+                const tryPatch = () => {
+                    try {
+                        const editor = iframeWindow.Asc?.editor;
+                        const ac = iframeWindow.AscCommon;
+                        
+                        // === AGGRESSIVE LOCK DISABLE ===
+                        
+                        // 1. Disable lock drawing at the graphics level
+                        if (editor?.WordControl?.m_oDrawingDocument) {
+                            editor.WordControl.m_oDrawingDocument.IsLockObjectsEnable = false;
+                            console.log('[Lock Disable] ✓ IsLockObjectsEnable = false');
+                        }
+                        
+                        // 2. Disable co-author marks drawing
+                        if (editor && 'isCoMarksDraw' in editor) {
+                            editor.isCoMarksDraw = false;
+                        }
+                        
+                        // 3. Override the DrawLockParagraph function to do nothing
+                        if (ac?.CGraphics?.prototype) {
+                            ac.CGraphics.prototype.DrawLockParagraph = function() {};
+                            ac.CGraphics.prototype.DrawLockObjectRect = function() {};
+                            console.log('[Lock Disable] ✓ Disabled DrawLockParagraph/DrawLockObjectRect');
+                        }
+                        
+                        // 4. Force collaborative editing into "fast" mode  
+                        if (ac?.CollaborativeEditing) {
+                            console.log('[Lock Disable] Found CollaborativeEditing');
+                            const CE = ac.CollaborativeEditing;
+                            if (CE.prototype) {
+                                CE.prototype.Is_Fast = function() { return true; };
+                                CE.prototype.getFast = function() { return true; };
+                                CE.prototype.isLocked = function() { return false; };
+                                CE.prototype.Is_SingleUser = function() { return true; };
+                            }
+                        }
+                        
+                        // 5. Patch the global collaborative editing instance
+                        if (ac?.g_oCollaborativeEditing) {
+                            const gCE = ac.g_oCollaborativeEditing;
+                            gCE.m_bFast = true;
+                            gCE.m_bSingleUser = true;
+                            gCE.Is_Fast = function() { return true; };
+                            gCE.getFast = function() { return true; };
+                            gCE.Is_SingleUser = function() { return true; };
+                            gCE.isLocked = function() { return false; };
+                            gCE.getLockInfo = function() { return null; };
+                            gCE.m_aLocks = [];
+                            gCE.m_aLocksToSend = [];
+                            console.log('[Lock Disable] ✓ Patched g_oCollaborativeEditing');
+                        }
+                        
+                        // 6. Patch editor's collaborativeEditing
+                        if (editor?.collaborativeEditing) {
+                            const eCE = editor.collaborativeEditing;
+                            eCE.m_bFast = true;
+                            eCE.m_bSingleUser = true;
+                            eCE.Is_Fast = function() { return true; };
+                            eCE.getFast = function() { return true; };
+                            eCE.Is_SingleUser = function() { return true; };
+                            console.log('[Lock Disable] ✓ Patched editor.collaborativeEditing');
+                        }
+                        
+                        // 7. Patch CoAuthoringApi to disable lock checks
+                        if (editor?.CoAuthoringApi) {
+                            editor.CoAuthoringApi.isLocked = function() { return false; };
+                            editor.CoAuthoringApi.getLock = function() { return true; }; // Always grant
+                            editor.CoAuthoringApi.releaseLock = function() {};
+                            console.log('[Lock Disable] ✓ Patched Asc.editor.CoAuthoringApi');
+                        }
+                        
+                        // 8. Disable lock checking in document
+                        if (ac?.CDocument?.prototype) {
+                            ac.CDocument.prototype.IsSelectionLocked = function() { return false; };
+                            ac.CDocument.prototype.Document_Is_SelectionLocked = function() { return false; };
+                            console.log('[Lock Disable] ✓ Patched CDocument.IsSelectionLocked');
+                        }
+                        
+                        // 9. CRITICAL: Disable Add_CheckLock - this is what triggers the lock UI
+                        if (ac?.CollaborativeEditing) {
+                            ac.CollaborativeEditing.Add_CheckLock = function() { return false; };
+                            console.log('[Lock Disable] ✓ Disabled CollaborativeEditing.Add_CheckLock');
+                        }
+                        if (ac?.g_oCollaborativeEditing) {
+                            ac.g_oCollaborativeEditing.Add_CheckLock = function() { return false; };
+                            console.log('[Lock Disable] ✓ Disabled g_oCollaborativeEditing.Add_CheckLock');
+                        }
+                        
+                        // 10. Patch CLock.Check to do nothing
+                        if (ac?.CLock?.prototype) {
+                            ac.CLock.prototype.Check = function() { return false; };
+                            ac.CLock.prototype.Get_Type = function() { return ac.c_oAscLockTypes?.kLockTypeNone || 0; };
+                            console.log('[Lock Disable] ✓ Patched CLock.Check');
+                        }
+                        
+                        // 11. Patch Paragraph lock checking  
+                        if (iframeWindow.AscWord?.Paragraph?.prototype) {
+                            iframeWindow.AscWord.Paragraph.prototype.Document_Is_SelectionLocked = function() { return false; };
+                            console.log('[Lock Disable] ✓ Patched AscWord.Paragraph');
+                        }
+                        
+                    } catch (e) {
+                        console.log('[Lock Disable] Patch attempt error:', e.message);
+                    }
+                };
+                
+                // Try immediately and multiple times
+                tryPatch();
+                setTimeout(tryPatch, 100);
+                setTimeout(tryPatch, 300);
+                setTimeout(tryPatch, 500);
+                setTimeout(tryPatch, 1000);
+                setTimeout(tryPatch, 2000);
+                setTimeout(tryPatch, 3000);
+                setTimeout(tryPatch, 5000);
+                
+            } catch (e) {
+                console.log('[Lock Disable] Error:', e.message);
+            }
+        }
+        
+        // Load custom styles on page load
+        loadCustomIframeStyles();
 
         let editor = null;
         let currentType = null;
@@ -728,8 +1026,14 @@
                     mode: 'edit',
                     lang: 'en',
                     user: {
-                        id: 'user_' + Math.random().toString(36).substr(2, 9),
+                        id: GLOBAL_USER_ID,
                         name: 'Guest'
+                    },
+                    // CRITICAL: Disable collaborative editing locks for single-user mode
+                    // 'fast' mode means no lock checking, immediate editing
+                    coEditing: {
+                        mode: 'fast',
+                        change: false
                     },
                     customization: {
                         autosave: false,
@@ -742,7 +1046,6 @@
                         hideRightMenu: false,
                         about: false,
                         feedback: false
-                        // Note: hideFileMenu removed - testing if lock fix helps File menu work
                     }
                 },
                 events: {
@@ -774,6 +1077,14 @@
                     onDocumentReady: function() {
                         console.log('[Editor] Document ready');
                         updateStatus(`Ready • Editing ${filename}.${fileType}`);
+                        
+                        // Extra lock disable attempt after document is ready
+                        if (!coEditEnabled) {
+                            const iframe = document.querySelector('#editor iframe');
+                            if (iframe && iframe.contentWindow) {
+                                disableLockMechanism(iframe.contentWindow);
+                            }
+                        }
                     },
                     onError: function(e) {
                         console.error('[Editor] Error:', e);
@@ -1014,6 +1325,15 @@
                                 console.log('[Iframe Patch] ✓ XHR interceptor installed in iframe');
                             }
                             
+                            // Inject custom CSS styles into iframe
+                            injectCustomStyles(iframeWin);
+                            
+                            // CRITICAL: Disable lock checking in the editor
+                            // This patches the editor's internal lock mechanism
+                            if (!coEditEnabled) {
+                                disableLockMechanism(iframeWin);
+                            }
+                            
                             return true; // Success
                         } else {
                             if (iframePatchAttempt < 20) {
@@ -1039,9 +1359,20 @@
                 // ========== END IFRAME PATCH ==========
                 
                 // Connect mock server for CryptPad patched version
+                // The CryptPad patch REQUIRES connectMockServer to be called for the editor to work
+                // But we try to make it as minimal as possible when co-editing is disabled
                 if (editor.connectMockServer) {
-                    console.log('[Editor] Connecting mock server...');
-                    connectMockServer(editor, type, filename);
+                    if (coEditEnabled) {
+                        console.log('[Editor] Co-editing enabled - connecting mock server...');
+                        connectMockServer(editor, type, filename);
+                    } else {
+                        console.log('[Editor] Co-editing disabled - trying minimal mock server...');
+                        // Try to connect with a completely minimal mock server
+                        // that doesn't handle any collaborative editing features
+                        connectMockServerFast(editor, type, filename);
+                    }
+                } else {
+                    console.log('[Editor] No connectMockServer - using standard OnlyOffice mode');
                 }
             } catch (err) {
                 console.error('[Editor] Failed to create editor:', err);
@@ -1056,8 +1387,8 @@
             // Ensure window.APP exists (required by api.js)
             window.APP = window.APP || {};
             
-            // Generate a unique ID for this user/session (used in lock handling)
-            const myOOId = 'user_' + Math.random().toString(36).substr(2, 9);
+            // Use the global user ID for consistency with editor config
+            const myOOId = GLOBAL_USER_ID;
             console.log('[MockServer] User ID:', myOOId);
             
             // Store reference to send messages back to the editor
@@ -1098,32 +1429,37 @@
                     } else if (msg.type === 'getLock') {
                         console.log('[MockServer] Get lock request, block:', JSON.stringify(msg.block));
                         // In single-user mode, always grant the lock immediately
-                        // Return the lock in the format OnlyOffice expects
+                        // The lock must be granted synchronously to prevent UI freezing
                         if (sendToEditor) {
-                            // Build locks object with the requested block
-                            // For Word documents, locks is an object with block IDs as keys
-                            // For Excel, locks is an array
+                            // For single-user mode, grant all locks immediately
+                            // The locks object maps block IDs to lock info
+                            // CRITICAL: Must respond immediately, no setTimeout!
                             const locks = {};
-                            if (msg.block && msg.block.length > 0) {
-                                msg.block.forEach((b, idx) => {
-                                    const blockKey = typeof b === 'string' ? b : ('lock_' + idx + '_' + Date.now());
+                            if (msg.block && Array.isArray(msg.block)) {
+                                msg.block.forEach((block) => {
+                                    // Use the block value as the key
+                                    const blockKey = typeof block === 'object' ? JSON.stringify(block) : String(block);
                                     locks[blockKey] = {
-                                        time: Date.now(),
+                                        visitable: true,  // Important: marks as visitable
+                                        block: block,
                                         user: myOOId,
-                                        block: b
+                                        time: Date.now(),
+                                        changes: null
                                     };
                                 });
                             }
-                            console.log('[MockServer] Granting lock:', JSON.stringify(locks));
+                            console.log('[MockServer] Granting lock immediately:', Object.keys(locks).length, 'blocks');
                             
-                            // Small delay to simulate network
-                            setTimeout(() => {
-                                sendToEditor({
-                                    type: 'getLock',
-                                    locks: locks
-                                });
-                            }, 10);
+                            // Send lock response IMMEDIATELY - no delay!
+                            sendToEditor({
+                                type: 'getLock',
+                                locks: locks
+                            });
                         }
+                    } else if (msg.type === 'releaseLock') {
+                        // Handle lock release - just acknowledge
+                        console.log('[MockServer] Release lock request');
+                        // No response needed for release in single-user mode
                     } else if (msg.type === 'isSaveLock') {
                         console.log('[MockServer] Is save lock?');
                         // Tell editor save is NOT locked
@@ -1154,11 +1490,12 @@
                 getParticipants: function() {
                     return {
                         list: [{
-                            id: 'user_local',
-                            idOriginal: 'user_local', 
+                            id: myOOId,
+                            idOriginal: myOOId, 
                             username: 'Guest',
                             indexUser: 0,
-                            view: false
+                            view: false,
+                            connectionId: myOOId
                         }],
                         index: 0
                     };
@@ -1424,8 +1761,425 @@
                     img.src = url;
                 };
                 
+                // APP.printPdf - Called by CryptPad-patched OnlyOffice when generating PDF
+                // The dataContainer has: { data: Uint8Array (pdf.bin rendering buffer) }
+                // OnlyOffice calls this as: window.parent.APP.printPdf(dataContainer, callback)
+                window.APP.printPdf = function(dataContainer, callback) {
+                    console.log('[PrintPdf] Called by OnlyOffice');
+                    console.log('[PrintPdf] dataContainer:', dataContainer);
+                    
+                    if (!dataContainer || !dataContainer.data) {
+                        console.error('[PrintPdf] No data in container');
+                        callback && callback({ status: 'err' });
+                        return;
+                    }
+                    
+                    const pdfBinData = dataContainer.data;
+                    console.log('[PrintPdf] pdf.bin size:', pdfBinData.byteLength || pdfBinData.length, 'bytes');
+                    
+                    // The pdf.bin from OnlyOffice contains the rendered PDF data
+                    // We need to also get the document binary (.bin format)
+                    // Since this is called from iframe context, we need to access the editor properly
+                    
+                    // Try multiple ways to find the editor
+                    let api = null;
+                    
+                    // Method 1: Check if we're in an iframe and access parent's editor reference
+                    if (window.editor) {
+                        api = window.editor;
+                        console.log('[PrintPdf] Found editor in window.editor');
+                    }
+                    
+                    // Method 2: Look in the iframe
+                    if (!api) {
+                        const iframe = document.querySelector('#editor iframe');
+                        if (iframe && iframe.contentWindow) {
+                            api = iframe.contentWindow.Asc?.editor || iframe.contentWindow.editor;
+                            console.log('[PrintPdf] Found editor in iframe');
+                        }
+                    }
+                    
+                    // Method 3: Check frames
+                    if (!api && window.frames && window.frames.length > 0) {
+                        for (let i = 0; i < window.frames.length; i++) {
+                            try {
+                                api = window.frames[i].Asc?.editor || window.frames[i].editor;
+                                if (api) {
+                                    console.log('[PrintPdf] Found editor in frame', i);
+                                    break;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                    
+                    // Get document binary if we have an API
+                    let docBin = null;
+                    if (api) {
+                        try {
+                            if (api.asc_nativeGetFile) {
+                                docBin = api.asc_nativeGetFile();
+                                console.log('[PrintPdf] Got docBin via asc_nativeGetFile:', docBin?.length || docBin?.byteLength);
+                            } else if (api.asc_nativeGetFileData) {
+                                docBin = api.asc_nativeGetFileData();
+                                console.log('[PrintPdf] Got docBin via asc_nativeGetFileData:', docBin?.length || docBin?.byteLength);
+                            }
+                        } catch (e) {
+                            console.log('[PrintPdf] Error getting docBin:', e);
+                        }
+                    }
+                    
+                    // If we don't have docBin, we can still try with just pdf.bin
+                    // The pdf.bin may be self-sufficient for some operations
+                    
+                    const filename = document.getElementById('filename')?.value || 'document';
+                    
+                    // Send to server
+                    const formData = new FormData();
+                    if (docBin) {
+                        formData.append('docbin', new Blob([docBin]), 'document.bin');
+                    }
+                    formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
+                    formData.append('filename', filename);
+                    
+                    console.log('[PrintPdf] Sending to server - docBin:', docBin ? docBin.length || docBin.byteLength : 'none', 'pdfBin:', pdfBinData.length || pdfBinData.byteLength);
+                    updateStatus('Generating PDF...');
+                    
+                    fetch('/api/print-pdf', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Server error: ' + response.status);
+                        return response.blob();
+                    })
+                    .then(pdfBlob => {
+                        console.log('[PrintPdf] Got PDF:', pdfBlob.size, 'bytes');
+                        updateStatus('PDF ready!');
+                        
+                        // Create download link
+                        const url = URL.createObjectURL(pdfBlob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename + '.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                        
+                        callback && callback({ status: 'ok' });
+                    })
+                    .catch(err => {
+                        console.error('[PrintPdf] Error:', err);
+                        updateStatus('PDF generation failed: ' + err.message);
+                        callback && callback({ status: 'err' });
+                    });
+                };
+                
+                // APP.changeTheme - Called by CryptPad-patched OnlyOffice (presentation) when changing design theme
+                // This is a hook for collaborative theme syncing - we just log and allow it to proceed
+                window.APP.changeTheme = function(indexTheme) {
+                    console.log('[changeTheme] Theme change requested:', indexTheme);
+                    // In single-user mode, we don't need to sync with others
+                    // The editor will handle the theme change internally
+                };
+                
             } catch (err) {
                 console.error('[MockServer] Failed to connect:', err);
+            }
+        }
+
+        // Fast single-user mode mock server - NO LOCK HANDLING
+        // This is used when ?coedit is not in the URL
+        // It provides minimal callbacks needed for the editor to work without any lock UI
+        function connectMockServerFast(editorInstance, docType, filename) {
+            console.log('[MockServerFast] Connecting in fast single-user mode (no locks)');
+            
+            // Ensure window.APP exists
+            window.APP = window.APP || {};
+            
+            // Use the global user ID for consistency with editor config
+            const myOOId = GLOBAL_USER_ID;
+            
+            // Use an object wrapper so we can update the reference after connection
+            const editorComm = { send: null };
+            window.currentDocumentBinary = null;
+            
+            // Helper to send message (only if connected)
+            function sendMsg(msg) {
+                if (editorComm.send) {
+                    editorComm.send(msg);
+                }
+            }
+            
+            // Fast mock server for single-user mode
+            // STRATEGY: Tell editor that all locks belong to this user (so no lock visualization)
+            // When IsThisElementLock sees the lock belongs to the current user, it won't draw it
+            const mockServerFast = {
+                // Receive messages from editor
+                onMessage: function(msg) {
+                    // Handle getLock by claiming the lock immediately for this user
+                    // This tells the editor "you own this lock" so it won't draw lock indicators
+                    if (msg.type === 'getLock') {
+                        console.log('[MockServerFast] getLock - returning lock for this user');
+                        // Build a locks object that says "this user owns all the blocks"
+                        const blocks = msg.block || [];
+                        const locks = {};
+                        blocks.forEach(block => {
+                            // Each lock entry says this user owns it
+                            locks[JSON.stringify(block)] = {
+                                block: block,
+                                user: myOOId,
+                                time: Date.now(),
+                                sessionId: myOOId
+                            };
+                        });
+                        sendMsg({
+                            type: 'getLock',
+                            locks: locks
+                        });
+                        return;
+                    }
+                    
+                    // Release lock - just confirm it's released
+                    if (msg.type === 'releaseLock') {
+                        sendMsg({
+                            type: 'releaseLock',
+                            locks: {}
+                        });
+                        return;
+                    }
+                    
+                    if (msg.type === 'saveChanges') {
+                        sendMsg({
+                            type: 'saveChanges',
+                            changesIndex: 0,
+                            locks: [],
+                            excelAdditionalInfo: null
+                        });
+                    } else if (msg.type === 'unSaveLock') {
+                        sendMsg({ type: 'unSaveLock', index: -1 });
+                    } else if (msg.type === 'isSaveLock') {
+                        sendMsg({ type: 'saveLock', saveLock: false });
+                    } else if (msg.type === 'cursor') {
+                        // Ignore cursor updates
+                    } else if (msg.type === 'openDocument') {
+                        if (msg.message && msg.message.c === 'imgurls') {
+                            sendMsg({ type: 'documentOpen', data: { "imgurls": {} } });
+                        }
+                    }
+                    // Ignore all other message types silently
+                },
+                
+                getParticipants: function() {
+                    // Single user mode - return empty list (no other participants)
+                    // This tells the editor there's no one else to coordinate with
+                    return { list: [], index: -1 };
+                },
+                
+                onAuth: function() {
+                    console.log('[MockServerFast] Auth completed - single user mode');
+                    updateStatus(`Ready • Editing ${filename}`);
+                    
+                    // CRITICAL: Tell the editor we're in fast mode immediately after auth
+                    // This should prevent lock UI from appearing
+                    if (window.APP && typeof window.APP.onFastChange === 'function') {
+                        window.APP.onFastChange(true);
+                        console.log('[MockServerFast] Called APP.onFastChange(true)');
+                    }
+                },
+                
+                getImageURL: function(name) {
+                    console.log('[MockServerFast] getImageURL:', name);
+                    if (name.startsWith('blob:') || name.startsWith('data:') || name.startsWith('http')) {
+                        return Promise.resolve(name);
+                    }
+                    if (currentDocumentImages[name]) {
+                        return Promise.resolve(currentDocumentImages[name]);
+                    }
+                    return Promise.resolve(`/onlyoffice/v8/web-apps/apps/documenteditor/main/${name}`);
+                },
+                
+                getInitialChanges: function() {
+                    return [];
+                },
+                
+                onDocumentBinaryReady: function(binary) {
+                    console.log('[MockServerFast] Document binary ready:', binary?.length || 0, 'bytes');
+                    window.currentDocumentBinary = binary;
+                }
+            };
+
+            try {
+                // Connect mock server and store the send function
+                editorComm.send = editorInstance.connectMockServer(mockServerFast);
+                console.log('[MockServerFast] Connected successfully, editorComm.send:', typeof editorComm.send);
+                
+                // Set up APP hooks (same as full MockServer)
+                
+                // CRITICAL: Set up onFastChange to always report "fast" mode
+                // This is called by CryptPad OnlyOffice to switch between fast/strict mode
+                window.APP.onFastChange = function(isFast) {
+                    console.log('[MockServerFast] onFastChange called with:', isFast);
+                    // Always stay in fast mode - don't allow switching to strict
+                    window.APP.isFast = true;
+                };
+                window.APP.isFast = true; // Start in fast mode
+                
+                window.APP.UploadImageFiles = function(files, type, id, jwt, cb) {
+                    console.log('[UploadImageFiles] Called with', files?.length, 'files');
+                    if (!files || files.length === 0) { cb && cb(); return; }
+                    
+                    const processFile = (file, index) => {
+                        const reader = new FileReader();
+                        reader.onload = async function(e) {
+                            try {
+                                const blob = new Blob([e.target.result], { type: file.type });
+                                const blobUrl = URL.createObjectURL(blob);
+                                const ext = file.name.split('.').pop() || 'png';
+                                const imageName = 'image_' + Date.now() + '_' + index + '.' + ext;
+                                
+                                currentDocumentImages[imageName] = blobUrl;
+                                
+                                const iframe = document.querySelector('#editor iframe');
+                                if (iframe && iframe.contentWindow) {
+                                    const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
+                                    if (documentUrls) {
+                                        documentUrls.addImageUrl(imageName, blobUrl);
+                                    }
+                                }
+                                
+                                sendMsg({ type: 'documentOpen', data: { "imgurl": imageName } });
+                                
+                                if (index < files.length - 1) {
+                                    processFile(files[index + 1], index + 1);
+                                } else {
+                                    cb && cb();
+                                }
+                            } catch (err) {
+                                console.error('[UploadImageFiles] Error:', err);
+                                cb && cb();
+                            }
+                        };
+                        reader.readAsArrayBuffer(file);
+                    };
+                    processFile(files[0], 0);
+                };
+
+                // APP.AddImage - triggered from custom Add Image button
+                window.APP.AddImage = function(successCallback, errorCallback) {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = function() {
+                        const file = input.files[0];
+                        if (!file) { document.body.removeChild(input); return; }
+                        
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            const dataUrl = evt.target.result;
+                            const imageName = 'image_' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+                            currentDocumentImages[imageName] = dataUrl;
+                            
+                            const iframe = document.querySelector('#editor iframe');
+                            if (iframe && iframe.contentWindow) {
+                                const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
+                                if (documentUrls) {
+                                    documentUrls.addImageUrl(imageName, dataUrl);
+                                }
+                            }
+                            
+                            successCallback && successCallback({ name: imageName, url: dataUrl });
+                        };
+                        reader.onerror = function() { errorCallback && errorCallback('Failed to read file'); };
+                        reader.readAsDataURL(file);
+                        document.body.removeChild(input);
+                    };
+                    input.oncancel = function() { document.body.removeChild(input); };
+                    document.body.appendChild(input);
+                    input.click();
+                };
+
+                // APP.AddImageUrl
+                window.APP.AddImageUrl = function(url, successCallback, errorCallback) {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = function() {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.naturalWidth;
+                            canvas.height = img.naturalHeight;
+                            canvas.getContext('2d').drawImage(img, 0, 0);
+                            const dataUrl = canvas.toDataURL('image/png');
+                            const imageName = 'image_url_' + Date.now();
+                            currentDocumentImages[imageName] = dataUrl;
+                            
+                            const iframe = document.querySelector('#editor iframe');
+                            if (iframe && iframe.contentWindow) {
+                                const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
+                                if (documentUrls) { documentUrls.addImageUrl(imageName, dataUrl); }
+                            }
+                            successCallback && successCallback({ name: imageName, url: dataUrl });
+                        } catch (err) {
+                            errorCallback && errorCallback('Failed to process image: ' + err.message);
+                        }
+                    };
+                    img.onerror = function() { errorCallback && errorCallback('Failed to load image'); };
+                    img.src = url;
+                };
+
+                // APP.printPdf - PDF export
+                window.APP.printPdf = function(dataContainer, callback) {
+                    console.log('[PrintPdf] Called by OnlyOffice');
+                    
+                    const pdfBinData = dataContainer?.data;
+                    if (!pdfBinData) {
+                        console.error('[PrintPdf] No PDF data');
+                        callback && callback({ status: 'err' });
+                        return;
+                    }
+                    
+                    const docBin = window.currentDocumentBinary;
+                    const filename = document.getElementById('filename')?.value || 'document';
+                    
+                    const formData = new FormData();
+                    if (docBin) { formData.append('docbin', new Blob([docBin]), 'document.bin'); }
+                    formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
+                    formData.append('filename', filename);
+                    
+                    updateStatus('Generating PDF...');
+                    
+                    fetch('/api/print-pdf', { method: 'POST', body: formData })
+                        .then(response => {
+                            if (!response.ok) throw new Error('Server error: ' + response.status);
+                            return response.blob();
+                        })
+                        .then(pdfBlob => {
+                            updateStatus('PDF ready!');
+                            const url = URL.createObjectURL(pdfBlob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = filename + '.pdf';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                            callback && callback({ status: 'ok' });
+                        })
+                        .catch(err => {
+                            console.error('[PrintPdf] Error:', err);
+                            updateStatus('PDF generation failed: ' + err.message);
+                            callback && callback({ status: 'err' });
+                        });
+                };
+                
+                // APP.changeTheme - Called by CryptPad-patched OnlyOffice (presentation) when changing design theme
+                window.APP.changeTheme = function(indexTheme) {
+                    console.log('[changeTheme] Theme change requested:', indexTheme);
+                    // In single-user mode, we don't need to sync with others
+                };
+                
+            } catch (err) {
+                console.error('[MockServerFast] Failed to connect:', err);
             }
         }
 
@@ -1438,14 +2192,15 @@
 
             const ext = file.name.split('.').pop().toLowerCase();
             const typeMap = {
-                'docx': 'word', 'doc': 'word', 'odt': 'word',
-                'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell',
+                'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
+                'txt': 'word', 'html': 'word', 'htm': 'word', 'md': 'word',
+                'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
                 'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
             };
 
             const docType = typeMap[ext];
             if (!docType) {
-                alert('Unsupported file type: ' + ext);
+                alert('Unsupported file type: ' + ext + '\n\nSupported formats:\n• Word: docx, doc, rtf, txt, html, md\n• Excel: xlsx, xls, ods, csv\n• PowerPoint: pptx, ppt');
                 return;
             }
 
@@ -1551,8 +2306,13 @@
                     mode: 'edit',
                     lang: 'en',
                     user: {
-                        id: 'user_' + Math.random().toString(36).substr(2, 9),
+                        id: GLOBAL_USER_ID,
                         name: 'Guest'
+                    },
+                    // CRITICAL: Disable collaborative editing locks for single-user mode
+                    coEditing: {
+                        mode: 'fast',
+                        change: false
                     },
                     customization: {
                         autosave: false,
@@ -1596,6 +2356,14 @@
                             URL.revokeObjectURL(window.pendingDocumentUrl);
                             window.pendingDocumentUrl = null;
                         }
+                        
+                        // Extra lock disable attempt after document is ready
+                        if (!coEditEnabled) {
+                            const iframe = document.querySelector('#editor iframe');
+                            if (iframe && iframe.contentWindow) {
+                                disableLockMechanism(iframe.contentWindow);
+                            }
+                        }
                     },
                     onError: function(e) {
                         console.error('[Editor] Error:', e);
@@ -1607,10 +2375,74 @@
             };
 
             editor = new DocsAPI.DocEditor('editor', config);
+            
+            // Start iframe patching for opened files (same as createDocument)
+            let iframePatchAttempt = 0;
+            const tryPatchIframe = () => {
+                iframePatchAttempt++;
+                try {
+                    let editorFrame = document.querySelector('#editor iframe');
+                    if (editorFrame && editorFrame.contentWindow) {
+                        const iframeWin = editorFrame.contentWindow;
+                        
+                        // Inject custom CSS styles
+                        injectCustomStyles(iframeWin);
+                        
+                        // Patch fetch
+                        if (iframeWin.fetch && !iframeWin._fetchPatched) {
+                            const originalFetch = iframeWin.fetch;
+                            iframeWin.fetch = function(...args) {
+                                const [resource] = args;
+                                const url = typeof resource === 'string' ? resource : resource?.url;
+                                if (url && url.includes('/downloadas/')) {
+                                    window._downloadInProgress = true;
+                                    window._downloadStartTime = Date.now();
+                                    pollForDownload();
+                                }
+                                return originalFetch.apply(this, args);
+                            };
+                            iframeWin._fetchPatched = true;
+                        }
+                        
+                        // Patch XHR
+                        if (iframeWin.XMLHttpRequest && !iframeWin._xhrPatched) {
+                            const OrigXHR = iframeWin.XMLHttpRequest;
+                            iframeWin.XMLHttpRequest = function() {
+                                const xhr = new OrigXHR();
+                                const origOpen = xhr.open;
+                                xhr.open = function(method, url, ...rest) {
+                                    if (method === 'POST' && url.includes('/downloadas/')) {
+                                        window._downloadInProgress = true;
+                                        window._downloadStartTime = Date.now();
+                                        pollForDownload();
+                                    }
+                                    return origOpen.call(this, method, url, ...rest);
+                                };
+                                return xhr;
+                            };
+                            iframeWin._xhrPatched = true;
+                        }
+                        
+                        console.log('[OpenFile] ✓ Iframe patched with custom styles');
+                    } else if (iframePatchAttempt < 20) {
+                        setTimeout(tryPatchIframe, 500);
+                    }
+                } catch (e) {
+                    if (iframePatchAttempt < 20) setTimeout(tryPatchIframe, 500);
+                }
+            };
+            setTimeout(tryPatchIframe, 1000);
+            
             // CryptPad-patched OnlyOffice requires mock server
             // Document content is already loaded via URL - mock server handles collaborative features
-            console.log('[Editor] Connecting mock server for opened file...');
-            connectMockServer(editor, type, filename);
+            // Use fast mode unless co-editing is enabled
+            if (coEditEnabled) {
+                console.log('[Editor] Co-editing enabled - connecting full mock server...');
+                connectMockServer(editor, type, filename);
+            } else {
+                console.log('[Editor] Co-editing disabled - connecting fast mock server...');
+                connectMockServerFast(editor, type, filename);
+            }
         }
 
         function loadDocumentInEditor(type, filename, fileType, documentUrl) {
