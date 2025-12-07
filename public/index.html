@@ -3,313 +3,219 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Serverless Editor</title>
+    <title>Office Editor</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; height: 100vh; overflow: hidden; }
+        
+        /* Editor fills entire viewport */
+        #editor { width: 100%; height: 100%; position: relative; }
+        #editor iframe { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; border: none; }
+        
+        /* Small floating buttons - bottom right */
+        .fab-container {
+            position: fixed;
+            bottom: 30px;
+            right: 5px;
             display: flex;
-            flex-direction: column;
-            height: 100vh;
+            flex-direction: row;
+            gap: 8px;
+            z-index: 10000;
         }
-        .toolbar {
-            background: #fff;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 10px 20px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        .toolbar button {
-            padding: 8px 16px;
-            border: 1px solid #ddd;
-            background: #fff;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-        .toolbar button:hover {
-            background: #f8f8f8;
-            border-color: #4a90e2;
-        }
-        .toolbar button.primary {
-            background: #4a90e2;
-            color: white;
-            border-color: #4a90e2;
-        }
-        .toolbar button.primary:hover {
-            background: #357abd;
-        }
-        .toolbar input[type="text"] {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            width: 200px;
-        }
-        .toolbar input[type="file"] {
-            display: none;
-        }
-        .editor-container {
-            flex: 1;
-            position: relative;
-            background: #fff;
-        }
-        #editor {
-            width: 100%;
-            height: 100%;
-            position: relative;
-        }
-        #editor iframe {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100% !important;
-            height: 100% !important;
+        
+        .fab {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
             border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            transition: all 0.2s ease;
+            position: relative;
         }
-        .status {
-            padding: 8px 20px;
-            background: #f9f9f9;
-            border-top: 1px solid #e0e0e0;
-            font-size: 12px;
-            color: #666;
+        
+        /* Document type colors matching OnlyOffice toolbar */
+        .fab-container[data-doc-type="word"] .fab { background: #446995; }
+        .fab-container[data-doc-type="word"] .fab:hover { background: #3a5a82; }
+        .fab-container[data-doc-type="cell"] .fab { background: #3A8056; }
+        .fab-container[data-doc-type="cell"] .fab:hover { background: #2f6a47; }
+        .fab-container[data-doc-type="slide"] .fab { background: #B75B44; }
+        .fab-container[data-doc-type="slide"] .fab:hover { background: #a04d38; }
+        
+        .fab:hover {
+            transform: translateY(-2px);
         }
-        .loading {
+        
+        .fab svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+        
+        /* Dropdown */
+        .fab-dropdown {
             position: absolute;
-            top: 50%;
+            bottom: 44px;
+            right: 0;
+            background: #2d2d2d;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            min-width: 160px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(5px);
+            transition: all 0.2s ease;
+            overflow: hidden;
+        }
+        
+        .fab:hover .fab-dropdown { opacity: 1; visibility: visible; transform: translateY(0); }
+        
+        .dropdown-item {
+            padding: 10px 14px;
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            transition: background 0.15s ease;
+        }
+        
+        .dropdown-item:hover { background: rgba(255,255,255,0.1); }
+        .dropdown-item-icon { font-size: 14px; width: 20px; text-align: center; opacity: 0.8; }
+        .dropdown-divider { height: 1px; background: rgba(255,255,255,0.1); }
+        .dropdown-filename { padding: 8px 12px; }
+        .dropdown-filename input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 12px;
+            outline: none;
+        }
+        .dropdown-filename input:focus { border-color: rgba(255,255,255,0.4); }
+        
+        /* Hidden file input */
+        #file-input { display: none; }
+        
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 70px;
             left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
+            transform: translateX(-50%) translateY(20px);
+            background: #333;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 30000;
         }
-        .loading .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #4a90e2;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.error { background: #c0392b; }
+        .toast.success { background: #27ae60; }
     </style>
 </head>
 <body>
-    <div class="toolbar">
-        <button class="primary" onclick="createDocument('word')">📝 New Document</button>
-        <button class="primary" onclick="createDocument('cell')">📊 New Spreadsheet</button>
-        <button class="primary" onclick="createDocument('slide')">📽️ New Presentation</button>
-        <span style="margin: 0 10px; color: #ccc;">|</span>
-        <input type="text" id="filename" placeholder="Document name" value="Untitled">
-        <button onclick="document.getElementById('fileInput').click()">📂 Open</button>
-        <input type="file" id="fileInput" accept=".docx,.xlsx,.pptx,.ods,.doc,.xls,.ppt,.rtf,.csv,.txt,.md,.html,.htm" onchange="openFile(event)">
-        <!-- Download via File menu > Download as -->
-    </div>
+    <div id="editor"></div>
     
-    <div class="editor-container" id="editorContainer">
-        <div id="editor">
-            <div class="loading" id="welcomeScreen">
-                <p style="font-size: 16px; color: #666;">Click a button above to create a new document</p>
+    <!-- Small floating buttons -->
+    <div class="fab-container" id="fab-container" data-doc-type="word">
+        <!-- New document -->
+        <button class="fab" title="New">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 9h-2v2H9v-2H7v-2h2V7h2v2h2v2zm0-6V3.5L18.5 9H13z"/></svg>
+            <div class="fab-dropdown">
+                <div class="dropdown-item" onclick="createDocument('word')"><span class="dropdown-item-icon">📝</span>Document</div>
+                <div class="dropdown-item" onclick="createDocument('cell')"><span class="dropdown-item-icon">📊</span>Spreadsheet</div>
+                <div class="dropdown-item" onclick="createDocument('slide')"><span class="dropdown-item-icon">📽️</span>Presentation</div>
+                <div class="dropdown-divider"></div>
+                <div class="dropdown-item" onclick="document.getElementById('file-input').click()"><span class="dropdown-item-icon">📂</span>Open file...</div>
             </div>
-        </div>
+        </button>
+        
+        <!-- Download -->
+        <button class="fab" title="Download" id="download-btn">
+            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            <div class="fab-dropdown" id="download-dropdown"></div>
+        </button>
     </div>
     
-    <div class="status">
-        <span id="status">Ready • Select a document type to begin</span>
-    </div>
-
+    <input type="file" id="file-input" accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt,.odt,.ods,.odp,.rtf,.txt,.csv,.html,.md">
+    <div class="toast" id="toast"></div>
+    
     <script src="/onlyoffice/v8/web-apps/apps/api/documents/api.js"></script>
     <script>
-        // Register service worker to intercept download requests
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js', { scope: '/' })
-                .then(reg => {
-                    console.log('[SW Reg] Service worker registered:', reg.scope);
-                    console.log('[SW Reg] Current state:', reg.installing ? 'installing' : reg.waiting ? 'waiting' : reg.active ? 'active' : 'unknown');
-                })
-                .catch(err => {
-                    console.error('[SW Reg] Registration failed:', err);
-                });
-            
-            // Listen for download notifications from service worker
-            navigator.serviceWorker.addEventListener('message', (event) => {
-                console.log('[SW Message] ✓ Message received from service worker:', event.data);
-                if (event.data.type === 'download-ready' && event.data.url) {
-                    console.log('[SW Message] ✓ Download ready, calling triggerFileDownload with:', event.data.url);
-                    triggerFileDownload(event.data.url);
-                } else {
-                    console.log('[SW Message] ✗ Not a download-ready message or no URL');
-                }
-            });
-            
-            console.log('[SW] Service worker message listener installed');
-        } else {
-            console.warn('[SW] Service Worker not supported');
-        }
+        // ============================================
+        // STATE
+        // ============================================
+        let editor = null;
+        let currentType = 'word';
+        let currentDocUrl = null;
+        let currentDocBlob = null;
+        let currentFileName = 'Untitled';
+        let documentChanges = [];
+        let currentDocumentImages = {};
         
-        // Template loading - CryptPad format templates loaded dynamically
-        // The templates are AMD modules that return functions (taking newOO param) that return template strings
-        const EmptyDocTemplates = {
-            word: null,
-            cell: null,
-            slide: null
-        };
-
-        // Simple AMD loader for our template modules
-        window.define = function(factory) {
-            window._lastAMDModule = factory();
-        };
+        const GLOBAL_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+        const EmptyDocTemplates = { word: null, cell: null, slide: null };
+        
+        // AMD loader
+        window.define = function(factory) { window._lastAMDModule = factory(); };
         window.define.amd = true;
-
-        // Intercept both XHR and Fetch to catch download responses from OnlyOffice SDK
-        (function() {
-            // XHR Interception
-            const originalXHROpen = XMLHttpRequest.prototype.open;
-            const originalXHRSend = XMLHttpRequest.prototype.send;
-            
-            XMLHttpRequest.prototype.open = function(method, url) {
-                if (method === 'POST' && url.includes('/downloadas/')) {
-                    console.log('[XHR Open] Download request detected:', url);
-                }
-                this._downloadUrl = (method === 'POST' && url.includes('/downloadas/')) ? url : null;
-                return originalXHROpen.apply(this, arguments);
-            };
-            
-            XMLHttpRequest.prototype.send = function(body) {
-                if (this._downloadUrl) {
-                    console.log('[XHR Send] Sending download request, body size:', body ? body.length : 0);
-                    const xhr = this;
-                    const originalOnReadyStateChange = xhr.onreadystatechange;
-                    
-                    xhr.onreadystatechange = function() {
-                        console.log('[XHR State] readyState:', xhr.readyState, 'status:', xhr.status);
-                        if (xhr.readyState === 4 && xhr.status === 200) {
-                            try {
-                                const response = JSON.parse(xhr.responseText);
-                                console.log('[XHR Intercept] ✓ Download response:', response);
-                                
-                                if (response.error === 0 && response.url) {
-                                    console.log('[XHR Intercept] ✓ Valid URL found, triggering download:', response.url);
-                                    setTimeout(() => {
-                                        console.log('[XHR Intercept] Now downloading:', response.url);
-                                        triggerFileDownload(response.url);
-                                    }, 100);
-                                } else {
-                                    console.log('[XHR Intercept] ✗ Invalid response, error:', response.error);
-                                }
-                            } catch (e) {
-                                console.log('[XHR Intercept] ✗ Not JSON response:', xhr.responseText.substring(0, 100));
-                            }
-                        }
-                        if (originalOnReadyStateChange) {
-                            originalOnReadyStateChange.apply(this, arguments);
-                        }
-                    };
-                }
-                return originalXHRSend.apply(this, arguments);
-            };
-            
-            console.log('[XHR Intercept] XHR download response interceptor installed');
-            
-            // Fetch Interception
-            const originalFetch = window.fetch;
-            window.fetch = function(...args) {
-                const [resource, config] = args;
-                const url = typeof resource === 'string' ? resource : resource.url;
-                const method = (config && config.method) || 'GET';
-                
-                if (method === 'POST' && url.includes('/downloadas/')) {
-                    console.log('[Fetch Open] Download request detected:', url);
-                    console.log('[Fetch Send] Body size:', config && config.body ? config.body.length || config.body.byteLength : 0);
-                }
-                
-                const fetchPromise = originalFetch.apply(this, args);
-                
-                if (method === 'POST' && url.includes('/downloadas/')) {
-                    return fetchPromise
-                        .then(async (response) => {
-                            console.log('[Fetch Response] Status:', response.status);
-                            const clonedResponse = response.clone();
-                            const text = await response.text();
-                            
-                            try {
-                                const data = JSON.parse(text);
-                                console.log('[Fetch Intercept] ✓ Download response:', data);
-                                
-                                if (data.error === 0 && data.url) {
-                                    console.log('[Fetch Intercept] ✓ Valid URL found, triggering download:', data.url);
-                                    setTimeout(() => {
-                                        console.log('[Fetch Intercept] Now downloading:', data.url);
-                                        triggerFileDownload(data.url);
-                                    }, 100);
-                                } else {
-                                    console.log('[Fetch Intercept] ✗ Invalid response, error:', data.error);
-                                }
-                            } catch (e) {
-                                console.log('[Fetch Intercept] ✗ Not JSON response');
-                            }
-                            
-                            // Return original response to SDK
-                            return new Response(text, {
-                                status: clonedResponse.status,
-                                statusText: clonedResponse.statusText,
-                                headers: clonedResponse.headers
-                            });
-                        })
-                        .catch(err => {
-                            console.error('[Fetch Intercept] Error:', err);
-                            return fetchPromise;
-                        });
-                }
-                
-                return fetchPromise;
-            };
-            
-            console.log('[Fetch Intercept] Fetch download response interceptor installed');
-        })();
-
-        // Load templates from server
+        
+        const EXT_MAP = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
+        const TYPE_MAP = {
+            docx: 'word', doc: 'word', odt: 'word', rtf: 'word', txt: 'word', html: 'word', md: 'word',
+            xlsx: 'cell', xls: 'cell', ods: 'cell', csv: 'cell',
+            pptx: 'slide', ppt: 'slide', odp: 'slide', pdf: 'word'
+        };
+        
+        const DOWNLOAD_FORMATS = {
+            word: [
+                { ext: 'docx', label: 'Word (.docx)' },
+                { ext: 'pdf', label: 'PDF (.pdf)' },
+                { ext: 'odt', label: 'ODT (.odt)' },
+                { ext: 'rtf', label: 'RTF (.rtf)' },
+                { ext: 'txt', label: 'Text (.txt)' }
+            ],
+            cell: [
+                { ext: 'xlsx', label: 'Excel (.xlsx)' },
+                { ext: 'pdf', label: 'PDF (.pdf)' },
+                { ext: 'ods', label: 'ODS (.ods)' },
+                { ext: 'csv', label: 'CSV (.csv)' }
+            ],
+            slide: [
+                { ext: 'pptx', label: 'PowerPoint (.pptx)' },
+                { ext: 'pdf', label: 'PDF (.pdf)' },
+                { ext: 'odp', label: 'ODP (.odp)' }
+            ]
+        };
+        
+        // ============================================
+        // TEMPLATES
+        // ============================================
         async function loadTemplates() {
-            console.log('[Templates] Loading CryptPad templates...');
-            
-            const templateConfig = [
+            const configs = [
                 { type: 'word', path: '/templates/oodoc_base.js' },
                 { type: 'cell', path: '/templates/oocell_base.js' },
                 { type: 'slide', path: '/templates/ooslide_base.js' }
             ];
-
-            for (const config of templateConfig) {
+            for (const cfg of configs) {
                 try {
-                    // Load via script tag to execute AMD define
                     await new Promise((resolve, reject) => {
                         const script = document.createElement('script');
-                        script.src = config.path;
+                        script.src = cfg.path;
                         script.onload = () => {
-                            // After script loads, _lastAMDModule contains the factory result (a function)
                             if (window._lastAMDModule) {
-                                // Call the function with newOO=true to get the newer format
-                                const templateFn = window._lastAMDModule;
-                                const template = templateFn(true);  // Use newOO=true format
-                                if (template) {
-                                    EmptyDocTemplates[config.type] = template;
-                                    console.log(`[Templates] Loaded ${config.type}: ${template.substring(0, 60)}... (${template.length} chars)`);
-                                } else {
-                                    // Try without newOO param
-                                    const templateOld = templateFn();
-                                    if (templateOld) {
-                                        EmptyDocTemplates[config.type] = templateOld;
-                                        console.log(`[Templates] Loaded ${config.type} (old): ${templateOld.substring(0, 60)}... (${templateOld.length} chars)`);
-                                    }
-                                }
+                                EmptyDocTemplates[cfg.type] = window._lastAMDModule(true) || window._lastAMDModule();
                                 window._lastAMDModule = null;
                             }
                             resolve();
@@ -317,2360 +223,617 @@
                         script.onerror = reject;
                         document.head.appendChild(script);
                     });
-                } catch (err) {
-                    console.error(`[Templates] Failed to load ${config.type}:`, err);
-                }
+                } catch (e) { console.error('Template load error:', e); }
             }
-            
-            console.log('[Templates] Loaded:', {
-                word: EmptyDocTemplates.word ? EmptyDocTemplates.word.length + ' chars' : 'MISSING',
-                cell: EmptyDocTemplates.cell ? EmptyDocTemplates.cell.length + ' chars' : 'MISSING',
-                slide: EmptyDocTemplates.slide ? EmptyDocTemplates.slide.length + ' chars' : 'MISSING'
-            });
-        }
-
-        // Load templates on page load
-        loadTemplates();
-
-        // ========== CO-EDITING CONFIGURATION ==========
-        // Enable collaborative editing via URL parameter: ?coedit=true
-        // When disabled (default), editor runs in fast single-user mode with no lock checking
-        // When enabled, MockServer handles locks for future custom server integration
-        const urlParamsGlobal = new URLSearchParams(window.location.search);
-        const coEditEnabled = urlParamsGlobal.get('coedit') === 'true';
-        console.log('[Config] Co-editing mode:', coEditEnabled ? 'ENABLED (lock-based)' : 'DISABLED (fast single-user)');
-
-        // CRITICAL: Use a single user ID across editor config and mock server
-        // This ensures lock ownership is correctly attributed to "us"
-        const GLOBAL_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
-        console.log('[Config] Global user ID:', GLOBAL_USER_ID);
-
-        // ========== URL PARAMETER FILE OPENING ==========
-        // Support opening files via URL parameters: ?f=filename.docx or ?file=filename.docx
-        // Files are loaded from /samples/ directory or full URL
-        async function checkUrlParams() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const fileParam = urlParams.get('f') || urlParams.get('file');
-            
-            if (fileParam) {
-                console.log('[URL Params] File parameter found:', fileParam);
-                await openFileFromUrl(fileParam);
-            }
-        }
-
-        // Open a file from URL parameter
-        async function openFileFromUrl(filename) {
-            try {
-                // Decode URI component in case it was encoded
-                const decodedFilename = decodeURIComponent(filename);
-                
-                // Determine the URL - if it's a full URL use it, otherwise use /samples/
-                let fileUrl;
-                if (decodedFilename.startsWith('http://') || decodedFilename.startsWith('https://') || decodedFilename.startsWith('/')) {
-                    fileUrl = decodedFilename;
-                } else {
-                    // Encode the filename for URL (handles spaces and special characters)
-                    fileUrl = '/samples/' + encodeURIComponent(decodedFilename);
-                }
-                
-                console.log('[URL Open] Fetching file:', fileUrl);
-                updateStatus(`Loading ${decodedFilename}...`);
-                
-                const response = await fetch(fileUrl);
-                if (!response.ok) {
-                    throw new Error(`File not found: ${response.status}`);
-                }
-                
-                const arrayBuffer = await response.arrayBuffer();
-                console.log('[URL Open] Fetched file:', arrayBuffer.byteLength, 'bytes');
-                
-                // Get extension from filename
-                const ext = filename.split('.').pop().toLowerCase();
-                const typeMap = {
-                    'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
-                    'txt': 'word', 'html': 'word', 'htm': 'word', 'md': 'word',
-                    'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
-                    'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
-                };
-                
-                const docType = typeMap[ext];
-                if (!docType) {
-                    throw new Error(`Unsupported file type: ${ext}`);
-                }
-                
-                // Set filename in input (without extension)
-                const baseName = filename.replace(/\.[^/.]+$/, '').split('/').pop();
-                document.getElementById('filename').value = baseName;
-                
-                // Destroy current editor
-                destroyEditor();
-                
-                // Show loading status
-                document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Converting document...</p></div>';
-                updateStatus(`Converting ${filename}...`);
-                
-                // Send to server for conversion
-                const convertResponse = await fetch('/api/open', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/octet-stream',
-                        'X-File-Extension': ext
-                    },
-                    body: arrayBuffer
-                });
-                
-                if (!convertResponse.ok) {
-                    throw new Error(`Server error: ${convertResponse.status}`);
-                }
-                
-                const result = await convertResponse.json();
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-                
-                console.log('[URL Open] Conversion successful, data length:', result.size, 'chars');
-                
-                // Create blob URL for the converted document
-                const docBlob = new Blob([result.data], { type: 'text/plain' });
-                const docUrl = URL.createObjectURL(docBlob);
-                
-                // Store image data URLs
-                currentDocumentImages = {};
-                if (result.images && typeof result.images === 'object') {
-                    for (const [name, dataUrl] of Object.entries(result.images)) {
-                        currentDocumentImages[name] = dataUrl;
-                    }
-                }
-                
-                window.pendingDocumentUrl = docUrl;
-                currentType = docType;
-                
-                // Create the editor
-                createEditorForOpenedFile(docType, baseName, ext, docUrl);
-                
-            } catch (err) {
-                console.error('[URL Open] Error:', err);
-                alert('Failed to open file from URL: ' + err.message);
-                destroyEditor();
-                document.getElementById('editor').innerHTML = '<div class="loading"><p style="color: #666;">Click a button above to create a new document</p></div>';
-                updateStatus('Failed to open file');
-            }
-        }
-
-        // Check URL params after templates are loaded
-        setTimeout(checkUrlParams, 500);
-
-        // ========== IFRAME CUSTOM STYLES INJECTION ==========
-        // Load and inject custom CSS into editor iframe
-        let customIframeStyles = null;
-        
-        async function loadCustomIframeStyles() {
-            try {
-                const response = await fetch('/iframe-styles.css');
-                if (response.ok) {
-                    customIframeStyles = await response.text();
-                    console.log('[Iframe Styles] Loaded custom styles:', customIframeStyles.length, 'chars');
-                }
-            } catch (e) {
-                console.log('[Iframe Styles] No custom styles file found');
-            }
+            console.log('[Templates] Loaded');
         }
         
-        // Inject custom styles into iframe
-        function injectCustomStyles(iframeWindow) {
-            if (!customIframeStyles || !iframeWindow || !iframeWindow.document) return;
-            
-            try {
-                const doc = iframeWindow.document;
-                
-                // Check if already injected
-                if (doc.getElementById('custom-iframe-styles')) return;
-                
-                const style = doc.createElement('style');
-                style.id = 'custom-iframe-styles';
-                style.textContent = customIframeStyles;
-                doc.head.appendChild(style);
-                
-                console.log('[Iframe Styles] ✓ Custom styles injected into iframe');
-            } catch (e) {
-                console.log('[Iframe Styles] Failed to inject styles:', e.message);
-            }
+        // ============================================
+        // UI
+        // ============================================
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast ' + type + ' visible';
+            setTimeout(() => t.classList.remove('visible'), 3000);
         }
         
-        // Disable lock mechanism in the iframe's OnlyOffice editor
-        // This patches internal objects to prevent lock-based UI (red "Guest" labels)
-        function disableLockMechanism(iframeWindow) {
-            if (!iframeWindow) return;
-            
-            try {
-                console.log('[Lock Disable] Attempting to disable lock visualization...');
-                
-                // Try to find and patch the editor internals
-                const tryPatch = () => {
-                    try {
-                        const editor = iframeWindow.Asc?.editor;
-                        const ac = iframeWindow.AscCommon;
-                        
-                        // === AGGRESSIVE LOCK DISABLE ===
-                        
-                        // 1. Disable lock drawing at the graphics level
-                        if (editor?.WordControl?.m_oDrawingDocument) {
-                            editor.WordControl.m_oDrawingDocument.IsLockObjectsEnable = false;
-                            console.log('[Lock Disable] ✓ IsLockObjectsEnable = false');
-                        }
-                        
-                        // 2. Disable co-author marks drawing
-                        if (editor && 'isCoMarksDraw' in editor) {
-                            editor.isCoMarksDraw = false;
-                        }
-                        
-                        // 3. Override the DrawLockParagraph function to do nothing
-                        if (ac?.CGraphics?.prototype) {
-                            ac.CGraphics.prototype.DrawLockParagraph = function() {};
-                            ac.CGraphics.prototype.DrawLockObjectRect = function() {};
-                            console.log('[Lock Disable] ✓ Disabled DrawLockParagraph/DrawLockObjectRect');
-                        }
-                        
-                        // 4. Force collaborative editing into "fast" mode  
-                        if (ac?.CollaborativeEditing) {
-                            console.log('[Lock Disable] Found CollaborativeEditing');
-                            const CE = ac.CollaborativeEditing;
-                            if (CE.prototype) {
-                                CE.prototype.Is_Fast = function() { return true; };
-                                CE.prototype.getFast = function() { return true; };
-                                CE.prototype.isLocked = function() { return false; };
-                                CE.prototype.Is_SingleUser = function() { return true; };
-                            }
-                        }
-                        
-                        // 5. Patch the global collaborative editing instance
-                        if (ac?.g_oCollaborativeEditing) {
-                            const gCE = ac.g_oCollaborativeEditing;
-                            gCE.m_bFast = true;
-                            gCE.m_bSingleUser = true;
-                            gCE.Is_Fast = function() { return true; };
-                            gCE.getFast = function() { return true; };
-                            gCE.Is_SingleUser = function() { return true; };
-                            gCE.isLocked = function() { return false; };
-                            gCE.getLockInfo = function() { return null; };
-                            gCE.m_aLocks = [];
-                            gCE.m_aLocksToSend = [];
-                            console.log('[Lock Disable] ✓ Patched g_oCollaborativeEditing');
-                        }
-                        
-                        // 6. Patch editor's collaborativeEditing
-                        if (editor?.collaborativeEditing) {
-                            const eCE = editor.collaborativeEditing;
-                            eCE.m_bFast = true;
-                            eCE.m_bSingleUser = true;
-                            eCE.Is_Fast = function() { return true; };
-                            eCE.getFast = function() { return true; };
-                            eCE.Is_SingleUser = function() { return true; };
-                            console.log('[Lock Disable] ✓ Patched editor.collaborativeEditing');
-                        }
-                        
-                        // 7. Patch CoAuthoringApi to disable lock checks
-                        if (editor?.CoAuthoringApi) {
-                            editor.CoAuthoringApi.isLocked = function() { return false; };
-                            editor.CoAuthoringApi.getLock = function() { return true; }; // Always grant
-                            editor.CoAuthoringApi.releaseLock = function() {};
-                            console.log('[Lock Disable] ✓ Patched Asc.editor.CoAuthoringApi');
-                        }
-                        
-                        // 8. Disable lock checking in document
-                        if (ac?.CDocument?.prototype) {
-                            ac.CDocument.prototype.IsSelectionLocked = function() { return false; };
-                            ac.CDocument.prototype.Document_Is_SelectionLocked = function() { return false; };
-                            console.log('[Lock Disable] ✓ Patched CDocument.IsSelectionLocked');
-                        }
-                        
-                        // 9. CRITICAL: Disable Add_CheckLock - this is what triggers the lock UI
-                        if (ac?.CollaborativeEditing) {
-                            ac.CollaborativeEditing.Add_CheckLock = function() { return false; };
-                            console.log('[Lock Disable] ✓ Disabled CollaborativeEditing.Add_CheckLock');
-                        }
-                        if (ac?.g_oCollaborativeEditing) {
-                            ac.g_oCollaborativeEditing.Add_CheckLock = function() { return false; };
-                            console.log('[Lock Disable] ✓ Disabled g_oCollaborativeEditing.Add_CheckLock');
-                        }
-                        
-                        // 10. Patch CLock.Check to do nothing
-                        if (ac?.CLock?.prototype) {
-                            ac.CLock.prototype.Check = function() { return false; };
-                            ac.CLock.prototype.Get_Type = function() { return ac.c_oAscLockTypes?.kLockTypeNone || 0; };
-                            console.log('[Lock Disable] ✓ Patched CLock.Check');
-                        }
-                        
-                        // 11. Patch Paragraph lock checking  
-                        if (iframeWindow.AscWord?.Paragraph?.prototype) {
-                            iframeWindow.AscWord.Paragraph.prototype.Document_Is_SelectionLocked = function() { return false; };
-                            console.log('[Lock Disable] ✓ Patched AscWord.Paragraph');
-                        }
-                        
-                    } catch (e) {
-                        console.log('[Lock Disable] Patch attempt error:', e.message);
-                    }
-                };
-                
-                // Try immediately and multiple times
-                tryPatch();
-                setTimeout(tryPatch, 100);
-                setTimeout(tryPatch, 300);
-                setTimeout(tryPatch, 500);
-                setTimeout(tryPatch, 1000);
-                setTimeout(tryPatch, 2000);
-                setTimeout(tryPatch, 3000);
-                setTimeout(tryPatch, 5000);
-                
-            } catch (e) {
-                console.log('[Lock Disable] Error:', e.message);
-            }
+        function updateToolbarColor() {
+            const container = document.getElementById('fab-container');
+            if (container) container.setAttribute('data-doc-type', currentType);
         }
         
-        // Load custom styles on page load
-        loadCustomIframeStyles();
+        function updateDownloadOptions() {
+            const container = document.getElementById('download-dropdown');
+            const formats = DOWNLOAD_FORMATS[currentType] || DOWNLOAD_FORMATS.word;
+            const defaultName = currentFileName || 'Untitled';
+            container.innerHTML = `
+                <div class="dropdown-filename">
+                    <input type="text" id="download-filename" value="${defaultName}" placeholder="Filename">
+                </div>
+                <div class="dropdown-divider"></div>
+            ` + formats.map(f => 
+                `<div class="dropdown-item" onclick="downloadAs('${f.ext}')"><span class="dropdown-item-icon">📥</span>${f.label}</div>`
+            ).join('');
+            updateToolbarColor();
+        }
 
-        let editor = null;
-        let currentType = null;
-        let currentDocUrl = null;
-        let currentDocBlob = null;  // Store the document blob for mock server
-        let documentContent = null;
-        let documentChanges = [];  // Store all changes for export
-        let templatesLoaded = false;
-
-        // Destroy current editor and recreate the editor div
+        // ============================================
+        // EDITOR
+        // ============================================
         function destroyEditor() {
-            console.log('[Editor] Destroying current editor...');
-            
-            // Revoke any existing blob URL
-            if (currentDocUrl) {
-                URL.revokeObjectURL(currentDocUrl);
-                currentDocUrl = null;
-            }
-            
-            // Try to destroy editor if it has a method
-            if (editor) {
-                try {
-                    if (typeof editor.destroyEditor === 'function') {
-                        editor.destroyEditor();
-                    }
-                } catch (e) {
-                    console.log('[Editor] No destroy method or error:', e);
-                }
-                editor = null;
-            }
-            
-            // Recreate the editor container div
-            const container = document.getElementById('editorContainer');
-            if (container) {
-                // Remove old editor div completely
-                container.innerHTML = '';
-                // Create fresh editor div
-                const newEditorDiv = document.createElement('div');
-                newEditorDiv.id = 'editor';
-                container.appendChild(newEditorDiv);
-                console.log('[Editor] Fresh editor div created');
-            }
-            
-            // Reset state
+            if (currentDocUrl) { URL.revokeObjectURL(currentDocUrl); currentDocUrl = null; }
+            if (editor) { try { editor.destroyEditor(); } catch(e){} editor = null; }
+            document.getElementById('editor').innerHTML = '';
             currentDocBlob = null;
-            documentContent = null;
             documentChanges = [];
         }
-
-        function updateStatus(message) {
-            document.getElementById('status').textContent = message;
-            console.log('[Status]', message);
-        }
-
-        // Inject XHR interceptor into iframe to catch download responses
-        function injectDownloadInterceptor(win) {
-            try {
-                const originalXHROpen = win.XMLHttpRequest.prototype.open;
-                const originalXHRSend = win.XMLHttpRequest.prototype.send;
-                
-                win.XMLHttpRequest.prototype.open = function(method, url) {
-                    this._isDownload = (method === 'POST' && url.includes('/downloadas/'));
-                    return originalXHROpen.apply(this, arguments);
-                };
-                
-                win.XMLHttpRequest.prototype.send = function(body) {
-                    if (this._isDownload) {
-                        const xhr = this;
-                        const originalHandler = xhr.onreadystatechange;
-                        
-                        xhr.onreadystatechange = function() {
-                            if (xhr.readyState === 4 && xhr.status === 200) {
-                                try {
-                                    const response = JSON.parse(xhr.responseText);
-                                    console.log('[Iframe XHR] Download response:', response);
-                                    
-                                    if (response.error === 0 && response.url) {
-                                        console.log('[Iframe XHR] Triggering download:', response.url);
-                                        // Mark that download is in progress
-                                        window._downloadInProgress = true;
-                                        window._downloadStartTime = Date.now();
-                                        // Use parent window's download function
-                                        window.triggerFileDownload(response.url);
-                                    }
-                                } catch (e) {
-                                    // Not JSON, ignore
-                                }
-                            }
-                            if (originalHandler) {
-                                originalHandler.apply(this, arguments);
-                            }
-                        };
-                    }
-                    return originalXHRSend.apply(this, arguments);
-                };
-                
-                // Override the iframe's alert to suppress download-related errors
-                const originalAlert = win.alert;
-                win.alert = function(msg) {
-                    // Suppress alerts during download operations or after successful download
-                    if (window._downloadInProgress || (window._downloadSuccess && (Date.now() - window._downloadSuccessTime < 10000))) {
-                        console.log('[Iframe] Suppressing alert during download operation:', msg);
-                        return;
-                    }
-                    return originalAlert.apply(this, arguments);
-                };
-                
-                // Comprehensive interception of all OnlyOffice error dialogs
-                function interceptAllErrorDialogs() {
-                    // Check if download is in progress (within last 10 seconds)
-                    const isDownloadActive = () => {
-                        return window._downloadInProgress || 
-                               (window._downloadSuccess && (Date.now() - window._downloadSuccessTime < 10000)) ||
-                               (window._downloadStartTime && (Date.now() - window._downloadStartTime < 15000));
-                    };
-                    
-                    // Intercept Common.UI.alert
-                    if (win.Common && win.Common.UI && win.Common.UI.alert) {
-                        const originalUIAlert = win.Common.UI.alert;
-                        win.Common.UI.alert = function(opts) {
-                            if (isDownloadActive()) {
-                                console.log('[Iframe] Suppressing Common.UI.alert:', opts?.msg || opts);
-                                // Call the callback if provided to let the flow continue
-                                if (opts && opts.callback) {
-                                    setTimeout(() => opts.callback('ok'), 10);
-                                }
-                                return;
-                            }
-                            return originalUIAlert.apply(this, arguments);
-                        };
-                        console.log('[Iframe] Common.UI.alert interceptor installed');
-                    }
-                    
-                    // Intercept Common.UI.warning
-                    if (win.Common && win.Common.UI && win.Common.UI.warning) {
-                        const originalUIWarning = win.Common.UI.warning;
-                        win.Common.UI.warning = function(opts) {
-                            if (isDownloadActive()) {
-                                console.log('[Iframe] Suppressing Common.UI.warning:', opts?.msg || opts);
-                                if (opts && opts.callback) {
-                                    setTimeout(() => opts.callback('ok'), 10);
-                                }
-                                return;
-                            }
-                            return originalUIWarning.apply(this, arguments);
-                        };
-                    }
-                    
-                    // Intercept Common.UI.error 
-                    if (win.Common && win.Common.UI && win.Common.UI.error) {
-                        const originalUIError = win.Common.UI.error;
-                        win.Common.UI.error = function(opts) {
-                            if (isDownloadActive()) {
-                                console.log('[Iframe] Suppressing Common.UI.error:', opts?.msg || opts);
-                                if (opts && opts.callback) {
-                                    setTimeout(() => opts.callback('ok'), 10);
-                                }
-                                return;
-                            }
-                            return originalUIError.apply(this, arguments);
-                        };
-                    }
-                    
-                    // Intercept window modal creation - this catches the actual error dialog
-                    if (win.Common && win.Common.UI && win.Common.UI.Window) {
-                        const OriginalWindow = win.Common.UI.Window;
-                        
-                        // Wrap the Window class to intercept modal creation
-                        const wrappedWindow = function(options) {
-                            // Check if this is an error/warning modal and download is active
-                            if (isDownloadActive()) {
-                                const title = options?.title?.toLowerCase() || '';
-                                const msg = options?.msg?.toLowerCase() || '';
-                                const iconCls = options?.iconCls || '';
-                                
-                                // Detect error/warning dialogs
-                                if (title.includes('error') || title.includes('warning') || 
-                                    msg.includes('error') || msg.includes('unknown') ||
-                                    iconCls.includes('warn') || iconCls.includes('error')) {
-                                    console.log('[Iframe] Blocking error Window creation:', options);
-                                    // Return a dummy window object that does nothing
-                                    return {
-                                        show: function() { console.log('[Iframe] Dummy show()'); },
-                                        hide: function() {},
-                                        close: function() {},
-                                        on: function() { return this; },
-                                        off: function() { return this; },
-                                        $window: { css: function(){}, is: function(){ return false; } }
-                                    };
-                                }
-                            }
-                            return new OriginalWindow(options);
-                        };
-                        
-                        // Copy static properties
-                        for (let prop in OriginalWindow) {
-                            if (OriginalWindow.hasOwnProperty(prop)) {
-                                wrappedWindow[prop] = OriginalWindow[prop];
-                            }
-                        }
-                        wrappedWindow.prototype = OriginalWindow.prototype;
-                        
-                        win.Common.UI.Window = wrappedWindow;
-                        console.log('[Iframe] Common.UI.Window interceptor installed');
-                    }
-                    
-                    // Also try to intercept any showError/showWarning methods on controllers
-                    try {
-                        // Look for the main controller and intercept its error method
-                        if (win.DE && win.DE.getController) {
-                            const mainCtrl = win.DE.getController('Main');
-                            if (mainCtrl && mainCtrl.onError) {
-                                const origOnError = mainCtrl.onError.bind(mainCtrl);
-                                mainCtrl.onError = function(id, level, errData) {
-                                    if (isDownloadActive()) {
-                                        console.log('[Iframe] Suppressing DE Main.onError:', id, level);
-                                        return;
-                                    }
-                                    return origOnError(id, level, errData);
-                                };
-                                console.log('[Iframe] DE.Main.onError interceptor installed');
-                            }
-                        }
-                    } catch(e) {
-                        // Ignore errors accessing controllers
-                    }
-                    
-                    // Retry if Common.UI is not fully loaded yet
-                    if (!win.Common || !win.Common.UI || !win.Common.UI.alert) {
-                        setTimeout(interceptAllErrorDialogs, 500);
-                    }
-                }
-                
-                // Start interception attempts
-                interceptAllErrorDialogs();
-                
-                // Also retry multiple times as the UI loads
-                setTimeout(interceptAllErrorDialogs, 1000);
-                setTimeout(interceptAllErrorDialogs, 2000);
-                setTimeout(interceptAllErrorDialogs, 5000);
-                
-                console.log('[Iframe XHR] Interceptor installed in iframe');
-            } catch (e) {
-                console.error('[Iframe XHR] Failed to install interceptor:', e);
-            }
-        }
-
-        // Trigger file download from a URL
-        async function triggerFileDownload(url) {
-            try {
-                console.log('[Download] ▶ triggerFileDownload called with:', url);
-                updateStatus('Downloading file...');
-                
-                console.log('[Download] Fetching file from URL...');
-                const response = await fetch(url);
-                console.log('[Download] Fetch response status:', response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                const blob = await response.blob();
-                console.log('[Download] ✓ File fetched, size:', blob.size, 'bytes');
-                
-                // Extract filename from URL
-                const urlPath = new URL(url).pathname;
-                const filename = urlPath.split('/').pop() || 'download';
-                console.log('[Download] Extracted filename:', filename);
-                
-                // Create download link and trigger it
-                const downloadUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = downloadUrl;
-                a.download = filename;
-                console.log('[Download] Created download link, triggering click...');
-                document.body.appendChild(a);
-                a.click();
-                console.log('[Download] ✓ Click triggered');
-                document.body.removeChild(a);
-                URL.revokeObjectURL(downloadUrl);
-                
-                updateStatus(`Downloaded: ${filename}`);
-                console.log('[Download] ✓ Successfully downloaded:', filename, blob.size, 'bytes');
-                
-                // Mark download as successful - keep error suppression window longer
-                window._downloadSuccess = true;
-                window._downloadSuccessTime = Date.now();
-                console.log('[Download] Set success flags for error suppression');
-                
-                // Keep the download in progress flag for a bit longer to catch late errors
-                setTimeout(() => {
-                    window._downloadInProgress = false;
-                    console.log('[Download] ✓ Download state cleared after 5s');
-                }, 5000);
-                
-                return true;
-            } catch (err) {
-                console.error('[Download] Failed to fetch file:', err);
-                updateStatus(`Download failed: ${err.message}`);
-                // Still keep suppression active briefly in case of recovery
-                setTimeout(() => {
-                    window._downloadInProgress = false;
-                }, 3000);
-                return false;
-            }
-        }
-
-        // Wait for templates to be loaded
-        async function waitForTemplates() {
-            if (templatesLoaded) return true;
-            
-            // Wait up to 5 seconds for templates
-            for (let i = 0; i < 50; i++) {
-                if (EmptyDocTemplates.word && EmptyDocTemplates.cell && EmptyDocTemplates.slide) {
-                    templatesLoaded = true;
-                    return true;
-                }
-                await new Promise(r => setTimeout(r, 100));
-            }
-            return false;
-        }
-
-        // Create document blob from template - as PLAIN TEXT (not decoded)
-        // This matches how CryptPad does it in loadInitDocument()
-        function createDocumentBlob(type) {
-            const template = EmptyDocTemplates[type];
-            if (!template) {
-                console.error('No template for type:', type);
-                return null;
-            }
-            console.log(`[Template] Creating ${type} blob with ${template.length} chars`);
-            console.log(`[Template] Header: ${template.substring(0, 60)}`);
-            // The template is used as-is as plain text, NOT base64 decoded
-            // OnlyOffice expects this format: TYPE;version;size;base64data
-            return new Blob([template], { type: 'text/plain' });
-        }
-
+        
         async function createDocument(type) {
-            currentType = type;
-            const filename = document.getElementById('filename').value || 'Untitled';
-            
-            // Properly destroy previous editor and recreate the div
             destroyEditor();
-
-            // Show loading
-            document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading editor...</p></div>';
-            updateStatus(`Creating ${type} document...`);
-
-            // Wait for templates to be loaded
-            updateStatus(`Loading templates...`);
-            const loaded = await waitForTemplates();
-            if (!loaded) {
-                updateStatus('Error: Templates failed to load');
-                document.getElementById('editor').innerHTML = '<div class="loading"><p style="color: red;">Error: Failed to load document templates</p></div>';
-                return;
+            
+            // Wait for template
+            let attempts = 0;
+            while (!EmptyDocTemplates[type] && attempts < 50) {
+                await new Promise(r => setTimeout(r, 100));
+                attempts++;
             }
-
-            // Create document blob (plain text, not decoded)
-            const blob = createDocumentBlob(type);
-            if (!blob) {
-                updateStatus('Error: Failed to create document');
-                return;
+            if (!EmptyDocTemplates[type]) { showToast('Template not loaded', 'error'); return; }
+            
+            currentType = type;
+            currentDocBlob = new Blob([EmptyDocTemplates[type]], { type: 'text/plain' });
+            currentDocUrl = URL.createObjectURL(currentDocBlob);
+            
+            initEditor(document.getElementById('filename')?.value || 'Untitled');
+            updateDownloadOptions();
+        }
+        
+        async function openFile(file) {
+            destroyEditor();
+            
+            const ext = file.name.split('.').pop().toLowerCase();
+            currentType = TYPE_MAP[ext] || 'word';
+            const filename = file.name.replace(/\.[^/.]+$/, '');
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const response = await fetch('/api/open', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream', 'X-File-Extension': ext },
+                    body: arrayBuffer
+                });
+                if (!response.ok) throw new Error('Server error');
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                currentDocBlob = new Blob([result.data], { type: 'text/plain' });
+                currentDocUrl = URL.createObjectURL(currentDocBlob);
+                currentDocumentImages = result.images || {};
+                
+                initEditor(filename);
+                updateDownloadOptions();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
             }
-            // Store the blob for the mock server to provide
-            currentDocBlob = blob;
-            currentDocUrl = URL.createObjectURL(blob);
-
-            console.log('[Editor] Document blob URL:', currentDocUrl);
-            console.log('[Editor] Blob size:', blob.size, 'bytes');
-
-            // Map to file extensions and internal OO types
-            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
-            const ooTypeMap = { word: 'doc', cell: 'sheet', slide: 'presentation' };
-            const fileType = extMap[type] || 'docx';
-            const ooType = ooTypeMap[type] || 'doc';
-
-            // For CryptPad patched version, we DON'T pass a document URL
-            // The mock server provides the initial content via getInitialChanges
+        }
+        
+        async function openFromUrl(filePath) {
+            destroyEditor();
+            
+            try {
+                let fileUrl = filePath.startsWith('http') || filePath.startsWith('/') ? filePath : '/samples/' + encodeURIComponent(filePath);
+                const response = await fetch(fileUrl);
+                if (!response.ok) throw new Error('File not found');
+                
+                const arrayBuffer = await response.arrayBuffer();
+                const fileName = filePath.split('/').pop();
+                const ext = fileName.split('.').pop().toLowerCase();
+                
+                currentType = TYPE_MAP[ext] || 'word';
+                
+                const convertResponse = await fetch('/api/open', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream', 'X-File-Extension': ext },
+                    body: arrayBuffer
+                });
+                if (!convertResponse.ok) throw new Error('Conversion error');
+                const result = await convertResponse.json();
+                
+                currentDocBlob = new Blob([result.data], { type: 'text/plain' });
+                currentDocUrl = URL.createObjectURL(currentDocBlob);
+                currentDocumentImages = result.images || {};
+                
+                initEditor(fileName.replace(/\.[^/.]+$/, ''));
+                updateDownloadOptions();
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+                createDocument('word'); // Fallback
+            }
+        }
+        
+        function initEditor(filename) {
+            currentFileName = filename;
+            const fileType = EXT_MAP[currentType];
+            
             const config = {
-                documentType: type === 'cell' ? 'spreadsheet' : type === 'slide' ? 'presentation' : 'word',
+                documentType: currentType === 'cell' ? 'spreadsheet' : currentType === 'slide' ? 'presentation' : 'word',
                 document: {
                     fileType: fileType,
-                    key: 'doc_' + Date.now().toString(),
-                    title: `${filename}.${fileType}`,
-                    // NO URL - content comes from mock server
-                    url: currentDocUrl,  // Still needed for the editor to reference
-                    permissions: {
-                        edit: true,
-                        download: true,
-                        print: true,
-                        review: false,
-                        comment: false
-                    }
+                    key: 'doc_' + Date.now(),
+                    title: filename + '.' + fileType,
+                    url: currentDocUrl,
+                    permissions: { edit: true, download: true, print: true, review: false, comment: false }
                 },
                 editorConfig: {
                     mode: 'edit',
                     lang: 'en',
-                    user: {
-                        id: GLOBAL_USER_ID,
-                        name: 'Guest'
-                    },
-                    // CRITICAL: Disable collaborative editing locks for single-user mode
-                    // 'fast' mode means no lock checking, immediate editing
-                    coEditing: {
-                        mode: 'fast',
-                        change: false
-                    },
+                    user: { id: GLOBAL_USER_ID, name: 'Guest' },
+                    coEditing: { mode: 'fast', change: false },
                     customization: {
-                        autosave: false,
-                        forcesave: false,
-                        chat: false,
-                        comments: false,
-                        compactHeader: true,
-                        compactToolbar: false,
-                        help: false,
-                        hideRightMenu: false,
-                        about: false,
-                        feedback: false
+                        autosave: false, forcesave: false, chat: false, comments: false,
+                        compactHeader: true, compactToolbar: false, help: false,
+                        hideRightMenu: false, about: false, feedback: false
                     }
                 },
                 events: {
-                    onAppReady: function() {
-                        console.log('[Editor] App ready');
-                        updateStatus('Editor ready, loading document...');
-                        
-                        // Inject XHR interceptor into the editor iframe to catch download responses
-                        try {
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe) {
-                                // Force iframe to fill container
-                                iframe.style.position = 'absolute';
-                                iframe.style.top = '0';
-                                iframe.style.left = '0';
-                                iframe.style.width = '100%';
-                                iframe.style.height = '100%';
-                                iframe.style.border = 'none';
-                                console.log('[Editor] Forced iframe sizing');
-                                
-                                if (iframe.contentWindow) {
-                                    injectDownloadInterceptor(iframe.contentWindow);
-                                }
-                            }
-                        } catch (e) {
-                            console.log('[Editor] Could not inject interceptor:', e.message);
-                        }
-                    },
-                    onDocumentReady: function() {
-                        console.log('[Editor] Document ready');
-                        updateStatus(`Ready • Editing ${filename}.${fileType}`);
-                        
-                        // Extra lock disable attempt after document is ready
-                        if (!coEditEnabled) {
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe && iframe.contentWindow) {
-                                disableLockMechanism(iframe.contentWindow);
-                            }
-                        }
-                    },
-                    onError: function(e) {
-                        console.error('[Editor] Error:', e);
-                        // Check if download is active (within last 15 seconds of any download activity)
-                        const isDownloadActive = window._downloadInProgress || 
-                               (window._downloadSuccess && (Date.now() - window._downloadSuccessTime < 10000)) ||
-                               (window._downloadStartTime && (Date.now() - window._downloadStartTime < 15000));
-                        
-                        if (isDownloadActive) {
-                            console.log('[Editor] Suppressing error - download operation in progress');
-                            return;
-                        }
-                        updateStatus(`Error: ${e.data || JSON.stringify(e)}`);
-                    },
-                    onWarning: function(e) {
-                        console.warn('[Editor] Warning event triggered');
-                        console.log('[Editor] Warning details:', {
-                            hasTarget: !!e.target,
-                            hasData: !!e.data,
-                            dataKeys: e.data ? Object.keys(e.data) : [],
-                            fullWarning: e
-                        });
-                        
-                        // Suppress warning code -1 (generic unknown warning during downloads)
-                        if (e && e.data) {
-                            console.log('[Editor] Warning data contents:', e.data);
-                            if (e.data.warningCode === -1) {
-                                console.log('[Editor] ✓ Suppressing warning code -1');
-                                return;
-                            }
-                        }
-                        
-                        // Check if download is active
-                        const isDownloadActive = window._downloadInProgress || 
-                               (window._downloadSuccess && (Date.now() - window._downloadSuccessTime < 10000)) ||
-                               (window._downloadStartTime && (Date.now() - window._downloadStartTime < 15000));
-                        
-                        console.log('[Editor] Download active check:', {
-                            _downloadInProgress: window._downloadInProgress,
-                            _downloadSuccess: window._downloadSuccess,
-                            isDownloadActive: isDownloadActive
-                        });
-                        
-                        if (isDownloadActive) {
-                            console.log('[Editor] ✓ Suppressing warning during download operation');
-                            return;
-                        }
-                        
-                        // Check if this is actually a download response
-                        // The CryptPad patch sometimes sends download results as warnings
-                        if (e && e.data) {
-                            const data = e.data;
-                            // Check for download URL in warning data
-                            if (data.url || (typeof data === 'object' && data.data && data.data.url)) {
-                                const url = data.url || data.data.url;
-                                console.log('[Editor] Found download URL in warning:', url);
-                                triggerFileDownload(url);
-                            }
-                        }
-                        
-                        console.warn('[Editor] ⚠ Warning NOT suppressed, will show to user');
-                    },
-                    onDownloadAs: function(e) {
-                        console.log('[Editor] onDownloadAs triggered');
-                        console.log('[Editor] Download as event data:', e);
-                        // Mark download as in progress before processing
-                        window._downloadInProgress = true;
-                        window._downloadStartTime = Date.now();
-                        console.log('[Editor] Set download flags: _downloadInProgress=true');
-                        
-                        // When server returns download URL, trigger actual download
-                        if (e && e.data) {
-                            let url = null;
-                            if (typeof e.data === 'string') {
-                                url = e.data;
-                                console.log('[Editor] Download URL is string:', url);
-                            } else if (e.data.url) {
-                                url = e.data.url;
-                                console.log('[Editor] Download URL from e.data.url:', url);
-                            } else {
-                                console.log('[Editor] e.data is object but no url property:', Object.keys(e.data));
-                            }
-                            if (url) {
-                                console.log('[Editor] ✓ Triggering download from URL:', url);
-                                triggerFileDownload(url);
-                            } else {
-                                console.log('[Editor] ✗ No URL found to download');
-                            }
-                        } else {
-                            console.log('[Editor] ✗ onDownloadAs event has no data');
-                        }
-                    },
-                    onRequestSaveAs: function(e) {
-                        console.log('[Editor] ✓✓✓ onRequestSaveAs TRIGGERED - File menu Save As clicked!');
-                        console.log('[Editor] Save As event data:', e);
-                        // Mark download as in progress to suppress errors
-                        window._downloadInProgress = true;
-                        window._downloadStartTime = Date.now();
-                        console.log('[Editor] Calling downloadDocument()...');
-                        // Handle Save As from File menu
-                        downloadDocument();
-                    },
-                    onRequestSave: function(e) {
-                        console.log('[Editor] ✓✓✓ onRequestSave TRIGGERED - File menu Save clicked!');
-                        console.log('[Editor] Save request:', e);
-                        // Mark download as in progress to suppress errors
-                        window._downloadInProgress = true;
-                        window._downloadStartTime = Date.now();
-                        console.log('[Editor] Calling downloadDocument()...');
-                        // Handle Save from File menu - download the document
-                        downloadDocument();
-                    },
-                    onError: function(errorCode) {
-                        console.log('[Editor] Error event:', errorCode);
-                        // If download is in progress, suppress the error
-                        if (window._downloadInProgress) {
-                            console.log('[Editor] Suppressing error during download:', errorCode);
-                            return; // Prevent default error handling
-                        }
-                        // For other errors, show them
-                        console.error('[Editor] Real error (not download related):', errorCode);
+                    onAppReady: () => console.log('[Editor] Ready'),
+                    onDocumentReady: () => { console.log('[Editor] Document ready'); setupIframe(); },
+                    onError: (e) => { if (!window._downloadInProgress) console.error('[Editor] Error:', e); },
+                    onDownloadAs: (e) => {
+                        console.log('[Editor] onDownloadAs:', e);
+                        if (e?.data?.url || e?.data) triggerFileDownload(e.data.url || e.data);
                     }
                 },
                 type: 'desktop',
                 width: '100%',
                 height: '100%'
             };
-
-            console.log('[Editor] Creating editor with config:', config);
-
-            try {
-                // Clear and create editor
-                document.getElementById('editor').innerHTML = '';
-                editor = new DocsAPI.DocEditor('editor', config);
-                
-                console.log('[Editor] Editor created, type:', typeof editor, 'has api:', !!editor.api);
-                
-                // ========== CRITICAL FIX: Intercept at iframe level ==========
-                // Since editor.api is not exposed in CryptPad version, we need to intercept
-                // inside the iframe itself
-                
-                let iframePatchAttempt = 0;
-                const tryPatchIframe = () => {
-                    iframePatchAttempt++;
-                    try {
-                        // Try multiple ways to find the iframe
-                        let editorFrame = document.getElementById('editor')?.querySelector('iframe');
-                        if (!editorFrame) {
-                            editorFrame = document.querySelector('#editor iframe');
-                        }
-                        if (!editorFrame) {
-                            // OnlyOffice might create iframe with specific ID
-                            editorFrame = document.querySelector('iframe[name*="frameEditor"]');
-                        }
-                        if (!editorFrame) {
-                            // Try any iframe in the editor div
-                            const editorDiv = document.getElementById('editor');
-                            if (editorDiv) {
-                                const iframes = editorDiv.getElementsByTagName('iframe');
-                                if (iframes.length > 0) {
-                                    editorFrame = iframes[0];
-                                }
-                            }
-                        }
-                        
-                        console.log('[Iframe Patch] Attempt', iframePatchAttempt, '- Found iframe:', !!editorFrame);
-                        
-                        if (editorFrame && editorFrame.contentWindow) {
-                            console.log('[Iframe Patch] ✓ Found editor iframe, attempting to patch...');
-                            
-                            const iframeWin = editorFrame.contentWindow;
-                            
-                            // Intercept fetch inside the iframe
-                            if (iframeWin.fetch && !iframeWin._fetchPatched) {
-                                const originalFetch = iframeWin.fetch;
-                                iframeWin.fetch = function(...args) {
-                                    const [resource] = args;
-                                    const url = typeof resource === 'string' ? resource : resource?.url;
-                                    
-                                    if (url && url.includes('/downloadas/')) {
-                                        console.log('[Iframe Fetch] ✓✓✓ DOWNLOAD FETCH DETECTED!');
-                                        // Set up flags and start polling
-                                        window._downloadInProgress = true;
-                                        window._downloadStartTime = Date.now();
-                                        console.log('[Iframe Fetch] Starting poll for download result...');
-                                        pollForDownload();
-                                        // Let the original fetch proceed
-                                    }
-                                    
-                                    return originalFetch.apply(this, args);
-                                };
-                                iframeWin._fetchPatched = true;
-                                console.log('[Iframe Patch] ✓ Fetch interceptor installed in iframe');
-                            }
-                            
-                            // Also intercept XMLHttpRequest in iframe
-                            if (iframeWin.XMLHttpRequest && !iframeWin._xhrPatched) {
-                                const OrigXHR = iframeWin.XMLHttpRequest;
-                                iframeWin.XMLHttpRequest = function() {
-                                    const xhr = new OrigXHR();
-                                    const origOpen = xhr.open;
-                                    const origSetRequestHeader = xhr.setRequestHeader;
-                                    let isDownloadRequest = false;
-                                    
-                                    xhr.open = function(method, url, ...rest) {
-                                        if (method === 'POST' && url.includes('/downloadas/')) {
-                                            console.log('[Iframe XHR] ✓✓✓ DOWNLOAD XHR DETECTED!');
-                                            isDownloadRequest = true;
-                                            xhr._isDownload = true;
-                                            // Set up flags and start polling BEFORE the request completes
-                                            window._downloadInProgress = true;
-                                            window._downloadStartTime = Date.now();
-                                            // Start polling for the download result
-                                            console.log('[Iframe XHR] Starting poll for download result...');
-                                            pollForDownload();
-                                        }
-                                        return origOpen.call(this, method, url, ...rest);
-                                    };
-                                    
-                                    // Intercept send to add custom filename header
-                                    const origSend = xhr.send;
-                                    xhr.send = function(...args) {
-                                        if (isDownloadRequest && window.parent._pendingDownloadFilename) {
-                                            try {
-                                                xhr.setRequestHeader('X-Override-Filename', window.parent._pendingDownloadFilename);
-                                                console.log('[Iframe XHR] Added filename override header:', window.parent._pendingDownloadFilename);
-                                            } catch (e) {
-                                                console.log('[Iframe XHR] Could not add header:', e.message);
-                                            }
-                                        }
-                                        return origSend.apply(this, args);
-                                    };
-                                    
-                                    // Let the original request proceed - the server will convert and store the result
-                                    return xhr;
-                                };
-                                iframeWin._xhrPatched = true;
-                                console.log('[Iframe Patch] ✓ XHR interceptor installed in iframe');
-                            }
-                            
-                            // Inject custom CSS styles into iframe
-                            injectCustomStyles(iframeWin);
-                            
-                            // CRITICAL: Disable lock checking in the editor
-                            // This patches the editor's internal lock mechanism
-                            if (!coEditEnabled) {
-                                disableLockMechanism(iframeWin);
-                            }
-                            
-                            return true; // Success
-                        } else {
-                            if (iframePatchAttempt < 20) {
-                                console.log('[Iframe Patch] Iframe not ready, will retry in 500ms...');
-                                setTimeout(tryPatchIframe, 500);
-                            } else {
-                                console.warn('[Iframe Patch] ✗ Failed to find iframe after', iframePatchAttempt, 'attempts');
-                            }
-                            return false;
-                        }
-                    } catch (err) {
-                        console.error('[Iframe Patch] Error:', err);
-                        if (iframePatchAttempt < 20) {
-                            setTimeout(tryPatchIframe, 500);
-                        }
-                        return false;
-                    }
-                };
-                
-                // Start trying after a short delay
-                setTimeout(tryPatchIframe, 1000);
-                
-                // ========== END IFRAME PATCH ==========
-                
-                // Connect mock server for CryptPad patched version
-                // The CryptPad patch REQUIRES connectMockServer to be called for the editor to work
-                // But we try to make it as minimal as possible when co-editing is disabled
-                if (editor.connectMockServer) {
-                    if (coEditEnabled) {
-                        console.log('[Editor] Co-editing enabled - connecting mock server...');
-                        connectMockServer(editor, type, filename);
-                    } else {
-                        console.log('[Editor] Co-editing disabled - trying minimal mock server...');
-                        // Try to connect with a completely minimal mock server
-                        // that doesn't handle any collaborative editing features
-                        connectMockServerFast(editor, type, filename);
-                    }
-                } else {
-                    console.log('[Editor] No connectMockServer - using standard OnlyOffice mode');
-                }
-            } catch (err) {
-                console.error('[Editor] Failed to create editor:', err);
-                updateStatus(`Failed to create editor: ${err.message}`);
-                document.getElementById('editor').innerHTML = `<div class="loading"><p style="color: red;">Error: ${err.message}</p></div>`;
-            }
-        }
-
-        // Mock server implementation for CryptPad patched OnlyOffice
-        // This simulates what would normally be a WebSocket connection to a document server
-        function connectMockServer(editorInstance, docType, filename) {
-            // Ensure window.APP exists (required by api.js)
-            window.APP = window.APP || {};
             
-            // Use the global user ID for consistency with editor config
-            const myOOId = GLOBAL_USER_ID;
-            console.log('[MockServer] User ID:', myOOId);
-            
-            // Store reference to send messages back to the editor
-            let sendToEditor = null;
-            // Store the current document binary for downloads
-            window.currentDocumentBinary = null;
-            
-            const mockServer = {
-                // Called when OnlyOffice sends a message (auth, save, etc.)
-                onMessage: function(msg) {
-                    console.log('[MockServer] Received message:', msg);
-                    
-                    // Handle different message types
-                    if (msg.type === 'saveChanges') {
-                        console.log('[MockServer] Save changes:', msg.changes?.length || 0, 'changes');
-                        documentContent = msg.changes;
-                        // Accumulate changes for export
-                        if (msg.changes && Array.isArray(msg.changes)) {
-                            documentChanges = documentChanges.concat(msg.changes);
-                        }
-                        // Acknowledge save
-                        if (sendToEditor) {
-                            sendToEditor({
-                                type: 'saveChanges',
-                                changesIndex: documentChanges.length,
-                                locks: [],
-                                excelAdditionalInfo: null
-                            });
-                        }
-                    } else if (msg.type === 'unSaveLock') {
-                        console.log('[MockServer] Unlock save');
-                        if (sendToEditor) {
-                            sendToEditor({
-                                type: 'unSaveLock',
-                                index: -1
-                            });
-                        }
-                    } else if (msg.type === 'getLock') {
-                        console.log('[MockServer] Get lock request, block:', JSON.stringify(msg.block));
-                        // In single-user mode, always grant the lock immediately
-                        // The lock must be granted synchronously to prevent UI freezing
-                        if (sendToEditor) {
-                            // For single-user mode, grant all locks immediately
-                            // The locks object maps block IDs to lock info
-                            // CRITICAL: Must respond immediately, no setTimeout!
-                            const locks = {};
-                            if (msg.block && Array.isArray(msg.block)) {
-                                msg.block.forEach((block) => {
-                                    // Use the block value as the key
-                                    const blockKey = typeof block === 'object' ? JSON.stringify(block) : String(block);
-                                    locks[blockKey] = {
-                                        visitable: true,  // Important: marks as visitable
-                                        block: block,
-                                        user: myOOId,
-                                        time: Date.now(),
-                                        changes: null
-                                    };
-                                });
-                            }
-                            console.log('[MockServer] Granting lock immediately:', Object.keys(locks).length, 'blocks');
-                            
-                            // Send lock response IMMEDIATELY - no delay!
-                            sendToEditor({
-                                type: 'getLock',
-                                locks: locks
-                            });
-                        }
-                    } else if (msg.type === 'releaseLock') {
-                        // Handle lock release - just acknowledge
-                        console.log('[MockServer] Release lock request');
-                        // No response needed for release in single-user mode
-                    } else if (msg.type === 'isSaveLock') {
-                        console.log('[MockServer] Is save lock?');
-                        // Tell editor save is NOT locked
-                        if (sendToEditor) {
-                            sendToEditor({
-                                type: 'saveLock',
-                                saveLock: false
-                            });
-                        }
-                    } else if (msg.type === 'cursor') {
-                        // Cursor position updates - ignore in single-user mode
-                    } else if (msg.type === 'openDocument') {
-                        // Handle image URL requests when duplicating slides etc.
-                        console.log('[MockServer] Open document request:', msg);
-                        if (msg.message && msg.message.c === 'imgurls') {
-                            // Return empty image URLs
-                            if (sendToEditor) {
-                                sendToEditor({
-                                    type: 'documentOpen',
-                                    data: { "imgurls": {} }
-                                });
-                            }
-                        }
-                    }
-                },
-                
-                // Return list of participants (for collaborative editing)
-                getParticipants: function() {
-                    return {
-                        list: [{
-                            id: myOOId,
-                            idOriginal: myOOId, 
-                            username: 'Guest',
-                            indexUser: 0,
-                            view: false,
-                            connectionId: myOOId
-                        }],
-                        index: 0
-                    };
-                },
-                
-                // Called after auth completes
-                onAuth: function() {
-                    console.log('[MockServer] Auth completed');
-                    updateStatus(`Ready • Editing ${filename}`);
-                },
-                
-                // Get image URL - returns a Promise
-                // Called when OnlyOffice needs to load an image
-                getImageURL: function(name) {
-                    console.log('[MockServer] Get image URL:', name);
-                    
-                    // If already a data URL, blob URL, or http URL, use as-is
-                    if (name.startsWith('blob:') || name.startsWith('data:') || name.startsWith('http')) {
-                        return Promise.resolve(name);
-                    }
-                    
-                    // Check if we have this image as a data URL from the opened document
-                    if (currentDocumentImages[name]) {
-                        console.log('[MockServer] Found image in currentDocumentImages:', name);
-                        return Promise.resolve(currentDocumentImages[name]);
-                    }
-                    
-                    // Fallback to server path (backward compatibility)
-                    const imageUrl = `/onlyoffice/v8/web-apps/apps/documenteditor/main/${name}`;
-                    console.log('[MockServer] Fallback to server path:', imageUrl);
-                    return Promise.resolve(imageUrl);
-                },
-                
-                // Return initial changes to apply on top of the base document
-                // For CryptPad, this is for collaborative editing changes
-                // The base document content comes from the URL, not from here!
-                getInitialChanges: function() {
-                    console.log('[MockServer] Get initial changes - returning empty (base doc from URL)');
-                    // Always return empty array - document content is provided via URL
-                    return [];
-                },
-                
-                // Called when document binary is ready (for downloads)
-                onDocumentBinaryReady: function(binary) {
-                    console.log('[MockServer] Document binary ready:', binary?.length || 0, 'bytes');
-                    window.currentDocumentBinary = binary;
-                }
-            };
-
-            try {
-                // connectMockServer returns a function to send messages to the editor
-                sendToEditor = editorInstance.connectMockServer(mockServer);
-                console.log('[MockServer] Connected successfully, sendToEditor:', typeof sendToEditor);
-                
-                // Set up APP.UploadImageFiles for image insertion
-                // This is called by OnlyOffice when user inserts an image
-                window.APP = window.APP || {};
-                window.APP.UploadImageFiles = function(files, type, id, jwt, cb) {
-                    console.log('[UploadImageFiles] Called with', files?.length, 'files, type:', type);
-                    
-                    if (!files || files.length === 0) {
-                        cb && cb();
-                        return;
-                    }
-                    
-                    // Process each file
-                    const processFile = (file, index) => {
-                        const reader = new FileReader();
-                        reader.onload = async function(e) {
-                            try {
-                                const arrayBuffer = e.target.result;
-                                const blob = new Blob([arrayBuffer], { type: file.type });
-                                const blobUrl = URL.createObjectURL(blob);
-                                
-                                // Generate a unique name for this image
-                                const ext = file.name.split('.').pop() || 'png';
-                                const imageName = `image_upload_${Date.now()}_${index}.${ext}`;
-                                
-                                console.log('[UploadImageFiles] Created blob URL for', imageName, ':', blobUrl);
-                                
-                                // Try to add the image URL to OnlyOffice
-                                try {
-                                    const iframe = document.querySelector('#editor iframe');
-                                    if (iframe && iframe.contentWindow) {
-                                        const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                        if (documentUrls) {
-                                            documentUrls.addImageUrl(imageName, blobUrl);
-                                            console.log('[UploadImageFiles] Added image URL to documentUrls');
-                                        }
-                                    }
-                                } catch (err) {
-                                    console.log('[UploadImageFiles] Could not add to documentUrls:', err.message);
-                                }
-                                
-                                // Call callback with the image info
-                                cb && cb();
-                            } catch (err) {
-                                console.error('[UploadImageFiles] Error processing file:', err);
-                                cb && cb();
-                            }
-                        };
-                        reader.readAsArrayBuffer(file);
-                    };
-                    
-                    for (let i = 0; i < files.length; i++) {
-                        processFile(files[i], i);
-                    }
-                };
-                
-                // APP.AddImage - called when user selects "Image from File" in Insert menu
-                // Receives success callback (cb1) and error callback (cb2)
-                // Must call cb1({ name, url }) on success
-                window.APP.AddImage = function(successCallback, errorCallback) {
-                    console.log('[AddImage] Opening file picker for image');
-                    
-                    // Create a hidden file input
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'image/*';
-                    input.style.display = 'none';
-                    
-                    input.onchange = function(e) {
-                        const file = e.target.files[0];
-                        if (!file) {
-                            errorCallback && errorCallback('No file selected');
-                            document.body.removeChild(input);
-                            return;
-                        }
-                        
-                        console.log('[AddImage] Selected file:', file.name, file.type, file.size, 'bytes');
-                        
-                        const reader = new FileReader();
-                        reader.onload = function(evt) {
-                            const dataUrl = evt.target.result;
-                            console.log('[AddImage] Created data URL, length:', dataUrl.length);
-                            
-                            try {
-                                // Generate unique image name
-                                const imageName = 'image_' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-                                
-                                // Store in our image cache
-                                currentDocumentImages[imageName] = dataUrl;
-                                
-                                // Add to OnlyOffice document URLs
-                                const iframe = document.querySelector('#editor iframe');
-                                if (iframe && iframe.contentWindow) {
-                                    const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                    if (documentUrls) {
-                                        documentUrls.addImageUrl(imageName, dataUrl);
-                                        console.log('[AddImage] Added to documentUrls:', imageName);
-                                    }
-                                }
-                                
-                                // Call success callback with the image info
-                                // OnlyOffice will use this to insert the image
-                                console.log('[AddImage] Calling success callback with:', { name: imageName, url: dataUrl.substring(0, 50) + '...' });
-                                successCallback && successCallback({
-                                    name: imageName,
-                                    url: dataUrl
-                                });
-                            } catch (err) {
-                                console.error('[AddImage] Error:', err);
-                                errorCallback && errorCallback(err.message);
-                            }
-                        };
-                        reader.onerror = function() {
-                            errorCallback && errorCallback('Failed to read file');
-                        };
-                        reader.readAsDataURL(file);
-                        
-                        // Clean up
-                        document.body.removeChild(input);
-                    };
-                    
-                    input.oncancel = function() {
-                        document.body.removeChild(input);
-                    };
-                    
-                    document.body.appendChild(input);
-                    input.click();
-                };
-                
-                // APP.AddImageUrl - called when user uses "Image from URL" in Insert menu
-                // Receives the URL and callbacks
-                window.APP.AddImageUrl = function(url, successCallback, errorCallback) {
-                    console.log('[AddImageUrl] Loading image from URL:', url);
-                    
-                    // For external URLs, we need to proxy through our server to avoid CORS
-                    // Or convert to data URL client-side if same-origin
-                    
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    
-                    img.onload = function() {
-                        try {
-                            // Draw to canvas to get data URL
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.naturalWidth;
-                            canvas.height = img.naturalHeight;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0);
-                            
-                            const dataUrl = canvas.toDataURL('image/png');
-                            console.log('[AddImageUrl] Converted to data URL, length:', dataUrl.length);
-                            
-                            // Generate unique name
-                            const imageName = 'image_url_' + Date.now();
-                            
-                            // Store in cache
-                            currentDocumentImages[imageName] = dataUrl;
-                            
-                            // Add to OnlyOffice document URLs
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe && iframe.contentWindow) {
-                                const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                if (documentUrls) {
-                                    documentUrls.addImageUrl(imageName, dataUrl);
-                                }
-                            }
-                            
-                            console.log('[AddImageUrl] Success, calling callback');
-                            successCallback && successCallback({
-                                name: imageName,
-                                url: dataUrl
-                            });
-                        } catch (err) {
-                            console.error('[AddImageUrl] Canvas error:', err);
-                            errorCallback && errorCallback(err.message);
-                        }
-                    };
-                    
-                    img.onerror = function() {
-                        console.error('[AddImageUrl] Failed to load image from URL');
-                        // Try fetching through proxy if CORS fails
-                        fetch('/api/fetch-image?url=' + encodeURIComponent(url))
-                            .then(r => r.json())
-                            .then(data => {
-                                if (data.dataUrl) {
-                                    const imageName = 'image_url_' + Date.now();
-                                    currentDocumentImages[imageName] = data.dataUrl;
-                                    
-                                    const iframe = document.querySelector('#editor iframe');
-                                    if (iframe && iframe.contentWindow) {
-                                        const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                        if (documentUrls) {
-                                            documentUrls.addImageUrl(imageName, data.dataUrl);
-                                        }
-                                    }
-                                    
-                                    successCallback && successCallback({
-                                        name: imageName,
-                                        url: data.dataUrl
-                                    });
-                                } else {
-                                    errorCallback && errorCallback('Failed to fetch image');
-                                }
-                            })
-                            .catch(err => {
-                                errorCallback && errorCallback('CORS error and proxy failed: ' + err.message);
-                            });
-                    };
-                    
-                    img.src = url;
-                };
-                
-                // APP.printPdf - Called by CryptPad-patched OnlyOffice when generating PDF
-                // The dataContainer has: { data: Uint8Array (pdf.bin rendering buffer) }
-                // OnlyOffice calls this as: window.parent.APP.printPdf(dataContainer, callback)
-                window.APP.printPdf = function(dataContainer, callback) {
-                    console.log('[PrintPdf] Called by OnlyOffice');
-                    console.log('[PrintPdf] dataContainer:', dataContainer);
-                    
-                    if (!dataContainer || !dataContainer.data) {
-                        console.error('[PrintPdf] No data in container');
-                        callback && callback({ status: 'err' });
-                        return;
-                    }
-                    
-                    const pdfBinData = dataContainer.data;
-                    console.log('[PrintPdf] pdf.bin size:', pdfBinData.byteLength || pdfBinData.length, 'bytes');
-                    
-                    // The pdf.bin from OnlyOffice contains the rendered PDF data
-                    // We need to also get the document binary (.bin format)
-                    // Since this is called from iframe context, we need to access the editor properly
-                    
-                    // Try multiple ways to find the editor
-                    let api = null;
-                    
-                    // Method 1: Check if we're in an iframe and access parent's editor reference
-                    if (window.editor) {
-                        api = window.editor;
-                        console.log('[PrintPdf] Found editor in window.editor');
-                    }
-                    
-                    // Method 2: Look in the iframe
-                    if (!api) {
-                        const iframe = document.querySelector('#editor iframe');
-                        if (iframe && iframe.contentWindow) {
-                            api = iframe.contentWindow.Asc?.editor || iframe.contentWindow.editor;
-                            console.log('[PrintPdf] Found editor in iframe');
-                        }
-                    }
-                    
-                    // Method 3: Check frames
-                    if (!api && window.frames && window.frames.length > 0) {
-                        for (let i = 0; i < window.frames.length; i++) {
-                            try {
-                                api = window.frames[i].Asc?.editor || window.frames[i].editor;
-                                if (api) {
-                                    console.log('[PrintPdf] Found editor in frame', i);
-                                    break;
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                    
-                    // Get document binary if we have an API
-                    let docBin = null;
-                    if (api) {
-                        try {
-                            if (api.asc_nativeGetFile) {
-                                docBin = api.asc_nativeGetFile();
-                                console.log('[PrintPdf] Got docBin via asc_nativeGetFile:', docBin?.length || docBin?.byteLength);
-                            } else if (api.asc_nativeGetFileData) {
-                                docBin = api.asc_nativeGetFileData();
-                                console.log('[PrintPdf] Got docBin via asc_nativeGetFileData:', docBin?.length || docBin?.byteLength);
-                            }
-                        } catch (e) {
-                            console.log('[PrintPdf] Error getting docBin:', e);
-                        }
-                    }
-                    
-                    // If we don't have docBin, we can still try with just pdf.bin
-                    // The pdf.bin may be self-sufficient for some operations
-                    
-                    const filename = document.getElementById('filename')?.value || 'document';
-                    
-                    // Send to server
-                    const formData = new FormData();
-                    if (docBin) {
-                        formData.append('docbin', new Blob([docBin]), 'document.bin');
-                    }
-                    formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
-                    formData.append('filename', filename);
-                    
-                    console.log('[PrintPdf] Sending to server - docBin:', docBin ? docBin.length || docBin.byteLength : 'none', 'pdfBin:', pdfBinData.length || pdfBinData.byteLength);
-                    updateStatus('Generating PDF...');
-                    
-                    fetch('/api/print-pdf', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => {
-                        if (!response.ok) throw new Error('Server error: ' + response.status);
-                        return response.blob();
-                    })
-                    .then(pdfBlob => {
-                        console.log('[PrintPdf] Got PDF:', pdfBlob.size, 'bytes');
-                        updateStatus('PDF ready!');
-                        
-                        // Create download link
-                        const url = URL.createObjectURL(pdfBlob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename + '.pdf';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        
-                        callback && callback({ status: 'ok' });
-                    })
-                    .catch(err => {
-                        console.error('[PrintPdf] Error:', err);
-                        updateStatus('PDF generation failed: ' + err.message);
-                        callback && callback({ status: 'err' });
-                    });
-                };
-                
-                // APP.changeTheme - Called by CryptPad-patched OnlyOffice (presentation) when changing design theme
-                // This is a hook for collaborative theme syncing - we just log and allow it to proceed
-                window.APP.changeTheme = function(indexTheme) {
-                    console.log('[changeTheme] Theme change requested:', indexTheme);
-                    // In single-user mode, we don't need to sync with others
-                    // The editor will handle the theme change internally
-                };
-                
-            } catch (err) {
-                console.error('[MockServer] Failed to connect:', err);
-            }
-        }
-
-        // Fast single-user mode mock server - NO LOCK HANDLING
-        // This is used when ?coedit is not in the URL
-        // It provides minimal callbacks needed for the editor to work without any lock UI
-        function connectMockServerFast(editorInstance, docType, filename) {
-            console.log('[MockServerFast] Connecting in fast single-user mode (no locks)');
-            
-            // Ensure window.APP exists
-            window.APP = window.APP || {};
-            
-            // Use the global user ID for consistency with editor config
-            const myOOId = GLOBAL_USER_ID;
-            
-            // Use an object wrapper so we can update the reference after connection
-            const editorComm = { send: null };
-            window.currentDocumentBinary = null;
-            
-            // Helper to send message (only if connected)
-            function sendMsg(msg) {
-                if (editorComm.send) {
-                    editorComm.send(msg);
-                }
-            }
-            
-            // Fast mock server for single-user mode
-            // STRATEGY: Tell editor that all locks belong to this user (so no lock visualization)
-            // When IsThisElementLock sees the lock belongs to the current user, it won't draw it
-            const mockServerFast = {
-                // Receive messages from editor
-                onMessage: function(msg) {
-                    // Handle getLock by claiming the lock immediately for this user
-                    // This tells the editor "you own this lock" so it won't draw lock indicators
-                    if (msg.type === 'getLock') {
-                        console.log('[MockServerFast] getLock - returning lock for this user');
-                        // Build a locks object that says "this user owns all the blocks"
-                        const blocks = msg.block || [];
-                        const locks = {};
-                        blocks.forEach(block => {
-                            // Each lock entry says this user owns it
-                            locks[JSON.stringify(block)] = {
-                                block: block,
-                                user: myOOId,
-                                time: Date.now(),
-                                sessionId: myOOId
-                            };
-                        });
-                        sendMsg({
-                            type: 'getLock',
-                            locks: locks
-                        });
-                        return;
-                    }
-                    
-                    // Release lock - just confirm it's released
-                    if (msg.type === 'releaseLock') {
-                        sendMsg({
-                            type: 'releaseLock',
-                            locks: {}
-                        });
-                        return;
-                    }
-                    
-                    if (msg.type === 'saveChanges') {
-                        sendMsg({
-                            type: 'saveChanges',
-                            changesIndex: 0,
-                            locks: [],
-                            excelAdditionalInfo: null
-                        });
-                    } else if (msg.type === 'unSaveLock') {
-                        sendMsg({ type: 'unSaveLock', index: -1 });
-                    } else if (msg.type === 'isSaveLock') {
-                        sendMsg({ type: 'saveLock', saveLock: false });
-                    } else if (msg.type === 'cursor') {
-                        // Ignore cursor updates
-                    } else if (msg.type === 'openDocument') {
-                        if (msg.message && msg.message.c === 'imgurls') {
-                            sendMsg({ type: 'documentOpen', data: { "imgurls": {} } });
-                        }
-                    }
-                    // Ignore all other message types silently
-                },
-                
-                getParticipants: function() {
-                    // Single user mode - return empty list (no other participants)
-                    // This tells the editor there's no one else to coordinate with
-                    return { list: [], index: -1 };
-                },
-                
-                onAuth: function() {
-                    console.log('[MockServerFast] Auth completed - single user mode');
-                    updateStatus(`Ready • Editing ${filename}`);
-                    
-                    // CRITICAL: Tell the editor we're in fast mode immediately after auth
-                    // This should prevent lock UI from appearing
-                    if (window.APP && typeof window.APP.onFastChange === 'function') {
-                        window.APP.onFastChange(true);
-                        console.log('[MockServerFast] Called APP.onFastChange(true)');
-                    }
-                },
-                
-                getImageURL: function(name) {
-                    console.log('[MockServerFast] getImageURL:', name);
-                    if (name.startsWith('blob:') || name.startsWith('data:') || name.startsWith('http')) {
-                        return Promise.resolve(name);
-                    }
-                    if (currentDocumentImages[name]) {
-                        return Promise.resolve(currentDocumentImages[name]);
-                    }
-                    return Promise.resolve(`/onlyoffice/v8/web-apps/apps/documenteditor/main/${name}`);
-                },
-                
-                getInitialChanges: function() {
-                    return [];
-                },
-                
-                onDocumentBinaryReady: function(binary) {
-                    console.log('[MockServerFast] Document binary ready:', binary?.length || 0, 'bytes');
-                    window.currentDocumentBinary = binary;
-                }
-            };
-
-            try {
-                // Connect mock server and store the send function
-                editorComm.send = editorInstance.connectMockServer(mockServerFast);
-                console.log('[MockServerFast] Connected successfully, editorComm.send:', typeof editorComm.send);
-                
-                // Set up APP hooks (same as full MockServer)
-                
-                // CRITICAL: Set up onFastChange to always report "fast" mode
-                // This is called by CryptPad OnlyOffice to switch between fast/strict mode
-                window.APP.onFastChange = function(isFast) {
-                    console.log('[MockServerFast] onFastChange called with:', isFast);
-                    // Always stay in fast mode - don't allow switching to strict
-                    window.APP.isFast = true;
-                };
-                window.APP.isFast = true; // Start in fast mode
-                
-                window.APP.UploadImageFiles = function(files, type, id, jwt, cb) {
-                    console.log('[UploadImageFiles] Called with', files?.length, 'files');
-                    if (!files || files.length === 0) { cb && cb(); return; }
-                    
-                    const processFile = (file, index) => {
-                        const reader = new FileReader();
-                        reader.onload = async function(e) {
-                            try {
-                                const blob = new Blob([e.target.result], { type: file.type });
-                                const blobUrl = URL.createObjectURL(blob);
-                                const ext = file.name.split('.').pop() || 'png';
-                                const imageName = 'image_' + Date.now() + '_' + index + '.' + ext;
-                                
-                                currentDocumentImages[imageName] = blobUrl;
-                                
-                                const iframe = document.querySelector('#editor iframe');
-                                if (iframe && iframe.contentWindow) {
-                                    const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                    if (documentUrls) {
-                                        documentUrls.addImageUrl(imageName, blobUrl);
-                                    }
-                                }
-                                
-                                sendMsg({ type: 'documentOpen', data: { "imgurl": imageName } });
-                                
-                                if (index < files.length - 1) {
-                                    processFile(files[index + 1], index + 1);
-                                } else {
-                                    cb && cb();
-                                }
-                            } catch (err) {
-                                console.error('[UploadImageFiles] Error:', err);
-                                cb && cb();
-                            }
-                        };
-                        reader.readAsArrayBuffer(file);
-                    };
-                    processFile(files[0], 0);
-                };
-
-                // APP.AddImage - triggered from custom Add Image button
-                window.APP.AddImage = function(successCallback, errorCallback) {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'image/*';
-                    input.onchange = function() {
-                        const file = input.files[0];
-                        if (!file) { document.body.removeChild(input); return; }
-                        
-                        const reader = new FileReader();
-                        reader.onload = function(evt) {
-                            const dataUrl = evt.target.result;
-                            const imageName = 'image_' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-                            currentDocumentImages[imageName] = dataUrl;
-                            
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe && iframe.contentWindow) {
-                                const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                if (documentUrls) {
-                                    documentUrls.addImageUrl(imageName, dataUrl);
-                                }
-                            }
-                            
-                            successCallback && successCallback({ name: imageName, url: dataUrl });
-                        };
-                        reader.onerror = function() { errorCallback && errorCallback('Failed to read file'); };
-                        reader.readAsDataURL(file);
-                        document.body.removeChild(input);
-                    };
-                    input.oncancel = function() { document.body.removeChild(input); };
-                    document.body.appendChild(input);
-                    input.click();
-                };
-
-                // APP.AddImageUrl
-                window.APP.AddImageUrl = function(url, successCallback, errorCallback) {
-                    const img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = function() {
-                        try {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.naturalWidth;
-                            canvas.height = img.naturalHeight;
-                            canvas.getContext('2d').drawImage(img, 0, 0);
-                            const dataUrl = canvas.toDataURL('image/png');
-                            const imageName = 'image_url_' + Date.now();
-                            currentDocumentImages[imageName] = dataUrl;
-                            
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe && iframe.contentWindow) {
-                                const documentUrls = iframe.contentWindow.AscCommon?.g_oDocumentUrls;
-                                if (documentUrls) { documentUrls.addImageUrl(imageName, dataUrl); }
-                            }
-                            successCallback && successCallback({ name: imageName, url: dataUrl });
-                        } catch (err) {
-                            errorCallback && errorCallback('Failed to process image: ' + err.message);
-                        }
-                    };
-                    img.onerror = function() { errorCallback && errorCallback('Failed to load image'); };
-                    img.src = url;
-                };
-
-                // APP.printPdf - PDF export
-                window.APP.printPdf = function(dataContainer, callback) {
-                    console.log('[PrintPdf] Called by OnlyOffice');
-                    
-                    const pdfBinData = dataContainer?.data;
-                    if (!pdfBinData) {
-                        console.error('[PrintPdf] No PDF data');
-                        callback && callback({ status: 'err' });
-                        return;
-                    }
-                    
-                    const docBin = window.currentDocumentBinary;
-                    const filename = document.getElementById('filename')?.value || 'document';
-                    
-                    const formData = new FormData();
-                    if (docBin) { formData.append('docbin', new Blob([docBin]), 'document.bin'); }
-                    formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
-                    formData.append('filename', filename);
-                    
-                    updateStatus('Generating PDF...');
-                    
-                    fetch('/api/print-pdf', { method: 'POST', body: formData })
-                        .then(response => {
-                            if (!response.ok) throw new Error('Server error: ' + response.status);
-                            return response.blob();
-                        })
-                        .then(pdfBlob => {
-                            updateStatus('PDF ready!');
-                            const url = URL.createObjectURL(pdfBlob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = filename + '.pdf';
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            setTimeout(() => URL.revokeObjectURL(url), 1000);
-                            callback && callback({ status: 'ok' });
-                        })
-                        .catch(err => {
-                            console.error('[PrintPdf] Error:', err);
-                            updateStatus('PDF generation failed: ' + err.message);
-                            callback && callback({ status: 'err' });
-                        });
-                };
-                
-                // APP.changeTheme - Called by CryptPad-patched OnlyOffice (presentation) when changing design theme
-                window.APP.changeTheme = function(indexTheme) {
-                    console.log('[changeTheme] Theme change requested:', indexTheme);
-                    // In single-user mode, we don't need to sync with others
-                };
-                
-            } catch (err) {
-                console.error('[MockServerFast] Failed to connect:', err);
-            }
-        }
-
-        // Store image data URLs for the current document
-        let currentDocumentImages = {};
-
-        async function openFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const ext = file.name.split('.').pop().toLowerCase();
-            const typeMap = {
-                'docx': 'word', 'doc': 'word', 'odt': 'word', 'rtf': 'word',
-                'txt': 'word', 'html': 'word', 'htm': 'word', 'md': 'word',
-                'xlsx': 'cell', 'xls': 'cell', 'ods': 'cell', 'csv': 'cell',
-                'pptx': 'slide', 'ppt': 'slide', 'odp': 'slide'
-            };
-
-            const docType = typeMap[ext];
-            if (!docType) {
-                alert('Unsupported file type: ' + ext + '\n\nSupported formats:\n• Word: docx, doc, rtf, txt, html, md\n• Excel: xlsx, xls, ods, csv\n• PowerPoint: pptx, ppt');
-                return;
-            }
-
-            const filename = file.name.replace(/\.[^/.]+$/, '');
-            document.getElementById('filename').value = filename;
-            
-            // Destroy current editor first
-            destroyEditor();
-            
-            // Show loading status
-            document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Converting document...</p></div>';
-            updateStatus(`Converting ${file.name}...`);
-
-            try {
-                // Read file as ArrayBuffer
-                const arrayBuffer = await file.arrayBuffer();
-                console.log('[OpenFile] Read file:', file.name, arrayBuffer.byteLength, 'bytes');
-                
-                // CryptPad-patched OnlyOffice requires converting to internal format
-                // Send to server for conversion
-                const response = await fetch('/api/open', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/octet-stream',
-                        'X-File-Extension': ext
-                    },
-                    body: arrayBuffer
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Server error: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-                
-                console.log('[OpenFile] Conversion successful, data length:', result.size, 'chars');
-                console.log('[OpenFile] Data header:', result.data.substring(0, 60));
-                
-                // The data is already in CryptPad format: DOCY;v5;size;base64data
-                // This string goes directly into a text/plain blob for the URL
-                // Same as how templates work - NO decoding needed!
-                const docBlob = new Blob([result.data], { type: 'text/plain' });
-                const docUrl = URL.createObjectURL(docBlob);
-                console.log('[OpenFile] Created blob URL for converted document');
-                
-                // Store image data URLs for this document (as blob URLs)
-                currentDocumentImages = {};
-                if (result.images && typeof result.images === 'object') {
-                    console.log('[OpenFile] Document has images:', Object.keys(result.images));
-                    for (const [name, dataUrl] of Object.entries(result.images)) {
-                        currentDocumentImages[name] = dataUrl;
-                        console.log('[OpenFile] Stored image:', name);
-                    }
-                }
-                
-                // Store for cleanup later
-                window.pendingDocumentUrl = docUrl;
-                currentType = docType;
-                
-                // Create the editor with the document URL and images
-                createEditorForOpenedFile(docType, filename, ext, docUrl);
-                
-            } catch (err) {
-                console.error('[OpenFile] Error:', err);
-                alert('Failed to open file: ' + err.message);
-                destroyEditor();
-                document.getElementById('editor').innerHTML = '<div class="loading"><p style="color: #666;">Click a button above to create a new document</p></div>';
-                updateStatus('Failed to open file');
-            }
-            
-            event.target.value = '';
-        }
-
-        // Create editor for an opened file (content from converted document URL)
-        function createEditorForOpenedFile(type, filename, fileType, documentUrl) {
-            // Editor already destroyed by openFile, just update the loading message
-            document.getElementById('editor').innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading document...</p></div>';
-            updateStatus(`Opening ${filename}.${fileType}...`);
-            
-            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
-            const defaultExt = extMap[type] || 'docx';
-            
-            // Use the provided document URL (blob URL with converted content)
-            // This is critical: the URL must point to a blob containing the DOCY/XLSY/PPTY format string
-
-            const config = {
-                documentType: type === 'cell' ? 'spreadsheet' : type === 'slide' ? 'presentation' : 'word',
-                document: {
-                    fileType: defaultExt,  // Use internal format type, not original file type
-                    key: 'doc_' + Date.now().toString(),
-                    title: `${filename}.${fileType || defaultExt}`,
-                    url: documentUrl,  // Blob URL with converted document content
-                    permissions: {
-                        edit: true,
-                        download: true,
-                        print: true
-                    }
-                },
-                editorConfig: {
-                    mode: 'edit',
-                    lang: 'en',
-                    user: {
-                        id: GLOBAL_USER_ID,
-                        name: 'Guest'
-                    },
-                    // CRITICAL: Disable collaborative editing locks for single-user mode
-                    coEditing: {
-                        mode: 'fast',
-                        change: false
-                    },
-                    customization: {
-                        autosave: false,
-                        forcesave: false,
-                        chat: false,
-                        comments: false,
-                        compactHeader: true,
-                        help: false,
-                        about: false,
-                        feedback: false
-                    }
-                },
-                events: {
-                    onAppReady: function() {
-                        console.log('[Editor] App ready (opened file)');
-                        try {
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe) {
-                                // Force iframe to fill container
-                                iframe.style.position = 'absolute';
-                                iframe.style.top = '0';
-                                iframe.style.left = '0';
-                                iframe.style.width = '100%';
-                                iframe.style.height = '100%';
-                                iframe.style.border = 'none';
-                                console.log('[Editor] Forced iframe sizing');
-                                
-                                if (iframe.contentWindow) {
-                                    injectDownloadInterceptor(iframe.contentWindow);
-                                }
-                            }
-                        } catch (e) {
-                            console.log('[Editor] Could not inject interceptor:', e.message);
-                        }
-                    },
-                    onDocumentReady: function() {
-                        console.log('[Editor] Document ready (opened file)');
-                        updateStatus(`Ready • Editing ${filename}.${fileType || defaultExt}`);
-                        // Clean up blob URL after document loads
-                        if (window.pendingDocumentUrl) {
-                            URL.revokeObjectURL(window.pendingDocumentUrl);
-                            window.pendingDocumentUrl = null;
-                        }
-                        
-                        // Extra lock disable attempt after document is ready
-                        if (!coEditEnabled) {
-                            const iframe = document.querySelector('#editor iframe');
-                            if (iframe && iframe.contentWindow) {
-                                disableLockMechanism(iframe.contentWindow);
-                            }
-                        }
-                    },
-                    onError: function(e) {
-                        console.error('[Editor] Error:', e);
-                        if (!window._downloadInProgress) {
-                            updateStatus('Error: ' + (e.data?.errorDescription || 'Unknown error'));
-                        }
-                    }
-                }
-            };
-
             editor = new DocsAPI.DocEditor('editor', config);
             
-            // Start iframe patching for opened files (same as createDocument)
-            let iframePatchAttempt = 0;
-            const tryPatchIframe = () => {
-                iframePatchAttempt++;
-                try {
-                    let editorFrame = document.querySelector('#editor iframe');
-                    if (editorFrame && editorFrame.contentWindow) {
-                        const iframeWin = editorFrame.contentWindow;
-                        
-                        // Inject custom CSS styles
-                        injectCustomStyles(iframeWin);
-                        
-                        // Patch fetch
-                        if (iframeWin.fetch && !iframeWin._fetchPatched) {
-                            const originalFetch = iframeWin.fetch;
-                            iframeWin.fetch = function(...args) {
-                                const [resource] = args;
-                                const url = typeof resource === 'string' ? resource : resource?.url;
-                                if (url && url.includes('/downloadas/')) {
-                                    window._downloadInProgress = true;
-                                    window._downloadStartTime = Date.now();
-                                    pollForDownload();
-                                }
-                                return originalFetch.apply(this, args);
-                            };
-                            iframeWin._fetchPatched = true;
-                        }
-                        
-                        // Patch XHR
-                        if (iframeWin.XMLHttpRequest && !iframeWin._xhrPatched) {
-                            const OrigXHR = iframeWin.XMLHttpRequest;
-                            iframeWin.XMLHttpRequest = function() {
-                                const xhr = new OrigXHR();
-                                const origOpen = xhr.open;
-                                xhr.open = function(method, url, ...rest) {
-                                    if (method === 'POST' && url.includes('/downloadas/')) {
-                                        window._downloadInProgress = true;
-                                        window._downloadStartTime = Date.now();
-                                        pollForDownload();
-                                    }
-                                    return origOpen.call(this, method, url, ...rest);
-                                };
-                                return xhr;
-                            };
-                            iframeWin._xhrPatched = true;
-                        }
-                        
-                        console.log('[OpenFile] ✓ Iframe patched with custom styles');
-                    } else if (iframePatchAttempt < 20) {
-                        setTimeout(tryPatchIframe, 500);
-                    }
-                } catch (e) {
-                    if (iframePatchAttempt < 20) setTimeout(tryPatchIframe, 500);
-                }
-            };
-            setTimeout(tryPatchIframe, 1000);
-            
-            // CryptPad-patched OnlyOffice requires mock server
-            // Document content is already loaded via URL - mock server handles collaborative features
-            // Use fast mode unless co-editing is enabled
-            if (coEditEnabled) {
-                console.log('[Editor] Co-editing enabled - connecting full mock server...');
-                connectMockServer(editor, type, filename);
-            } else {
-                console.log('[Editor] Co-editing disabled - connecting fast mock server...');
-                connectMockServerFast(editor, type, filename);
-            }
-        }
-
-        function loadDocumentInEditor(type, filename, fileType, documentUrl) {
-            // This function is kept for backwards compatibility but shouldn't be used
-            // Use createEditorForOpenedFile instead
-            console.warn('[loadDocumentInEditor] Deprecated - use createEditorForOpenedFile');
-            createEditorForOpenedFile(type, filename, fileType, documentUrl);
-        }
-
-        async function downloadDocument() {
-            if (!editor) {
-                alert('Please create or open a document first');
-                return;
-            }
-
-            const filename = document.getElementById('filename').value || 'Untitled';
-            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
-            const ext = extMap[currentType] || 'docx';
-
-            console.log('[DownloadDocument] ▶ Starting download for:', `${filename}.${ext}`);
-            updateStatus(`Downloading ${filename}.${ext}...`);
-            
-            // Mark that we're starting a download - helps suppress spurious errors/warnings
-            // Set both flags to ensure comprehensive error suppression
-            window._downloadInProgress = true;
-            window._downloadStartTime = Date.now();
-            // Clear any previous success state 
-            window._downloadSuccess = false;
-            // Store the desired filename for the XHR interceptor to pass to server
-            window._pendingDownloadFilename = `${filename}.${ext}`;
-            console.log('[DownloadDocument] Set download flags and filename override, calling editor.downloadAs()');
-            
-            // Use the SDK's native downloadAs - it has access to the actual document content
-            try {
-                editor.downloadAs(`${filename}.${ext}`);
-                console.log('[DownloadDocument] ✓ editor.downloadAs() called, starting poll...');
-                
-                // Poll for the download to be ready (since SDK doesn't call our callback)
-                pollForDownload();
-            } catch (err) {
-                console.error('[Download] SDK downloadAs failed:', err);
-                updateStatus('Download failed: ' + err.message);
-                // Keep download flag active for a bit to suppress any late errors
-                setTimeout(() => {
-                    window._downloadInProgress = false;
-                }, 5000);
+            if (editor.connectMockServer) {
+                connectMockServer(editor);
             }
         }
         
-        // Also provide a function to trigger save from File menu format buttons
-        function saveAsFormat(format) {
-            if (!editor) {
-                alert('Please create or open a document first');
+        // ============================================
+        // MOCK SERVER
+        // ============================================
+        function connectMockServer(editorInstance) {
+            window.APP = window.APP || {};
+            let sendToEditor = null;
+            
+            const mockServer = {
+                onMessage: function(msg) {
+                    if (msg.type === 'saveChanges') {
+                        if (msg.changes) documentChanges = documentChanges.concat(msg.changes);
+                        sendToEditor?.({ type: 'saveChanges', changesIndex: documentChanges.length, locks: [], excelAdditionalInfo: null });
+                    } else if (msg.type === 'unSaveLock') {
+                        sendToEditor?.({ type: 'unSaveLock', index: -1 });
+                    } else if (msg.type === 'getLock') {
+                        const locks = {};
+                        (msg.block || []).forEach(block => {
+                            const key = typeof block === 'object' ? JSON.stringify(block) : String(block);
+                            locks[key] = { visitable: true, block, user: GLOBAL_USER_ID, time: Date.now(), changes: null };
+                        });
+                        sendToEditor?.({ type: 'getLock', locks });
+                    } else if (msg.type === 'isSaveLock') {
+                        sendToEditor?.({ type: 'saveLock', saveLock: false });
+                    } else if (msg.type === 'openDocument' && msg.message?.c === 'imgurls') {
+                        sendToEditor?.({ type: 'documentOpen', data: { imgurls: {} } });
+                    }
+                },
+                getParticipants: () => ({ list: [{ id: GLOBAL_USER_ID, idOriginal: GLOBAL_USER_ID, username: 'Guest', indexUser: 0, view: false, connectionId: GLOBAL_USER_ID }], index: 0 }),
+                onAuth: () => {},
+                getImageURL: (name) => {
+                    if (name.startsWith('blob:') || name.startsWith('data:') || name.startsWith('http')) return Promise.resolve(name);
+                    if (currentDocumentImages[name]) return Promise.resolve(currentDocumentImages[name]);
+                    return Promise.resolve(`/onlyoffice/v8/web-apps/apps/documenteditor/main/${name}`);
+                },
+                getInitialChanges: () => [],
+                onDocumentBinaryReady: (binary) => { window.currentDocumentBinary = binary; }
+            };
+            
+            try {
+                sendToEditor = editorInstance.connectMockServer(mockServer);
+            } catch (e) { console.error('[MockServer] Error:', e); }
+        }
+        
+        // ============================================
+        // IFRAME SETUP
+        // ============================================
+        function setupIframe() {
+            // Retry until iframe is fully accessible
+            let retries = 0;
+            const maxRetries = 30;
+            
+            function trySetup() {
+                retries++;
+                const iframe = document.querySelector('iframe[name="frameEditor"]') || document.querySelector('#editor iframe');
+                console.log(`[Iframe] Setup attempt ${retries}, iframe found:`, !!iframe);
+                
+                if (!iframe) {
+                    if (retries < maxRetries) setTimeout(trySetup, 500);
+                    return;
+                }
+                
+                const win = iframe.contentWindow;
+                if (!win || !win.document || !win.document.head) {
+                    console.log('[Iframe] contentWindow not ready yet');
+                    if (retries < maxRetries) setTimeout(trySetup, 500);
+                    return;
+                }
+                
+                // Wait for document to be fully loaded
+                if (win.document.readyState !== 'complete') {
+                    console.log('[Iframe] Document not complete yet:', win.document.readyState);
+                    if (retries < maxRetries) setTimeout(trySetup, 500);
+                    return;
+                }
+                
+                // Inject CSS into main editor iframe
+                try {
+                    // Check if already injected
+                    if (!win.document.querySelector('link[href="/iframe-styles.css"]')) {
+                        const link = win.document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.href = '/iframe-styles.css';
+                        win.document.head.appendChild(link);
+                        console.log('[Iframe] Injected styles into main iframe');
+                    }
+                    
+                    // Also check for nested iframe (OnlyOffice may have inner iframe)
+                    const innerIframe = win.document.querySelector('iframe');
+                    if (innerIframe?.contentWindow?.document?.head) {
+                        if (!innerIframe.contentWindow.document.querySelector('link[href="/iframe-styles.css"]')) {
+                            const innerLink = innerIframe.contentWindow.document.createElement('link');
+                            innerLink.rel = 'stylesheet';
+                            innerLink.href = '/iframe-styles.css';
+                            innerIframe.contentWindow.document.head.appendChild(innerLink);
+                            console.log('[Iframe] Injected styles into nested iframe');
+                        }
+                    }
+                } catch (e) {
+                    console.error('[Iframe] Style injection failed:', e.message);
+                    if (retries < maxRetries) setTimeout(trySetup, 500);
+                    return;
+                }
+                
+                // Patch XHR for download
+                if (!win._xhrPatched) {
+                    const OrigXHR = win.XMLHttpRequest;
+                    win.XMLHttpRequest = function() {
+                        const xhr = new OrigXHR();
+                        const origOpen = xhr.open;
+                        xhr.open = function(method, url, ...rest) {
+                            if (method === 'POST' && url.includes('/downloadas/')) {
+                                console.log('[XHR] Download request');
+                                window._downloadInProgress = true;
+                                pollForDownload();
+                            }
+                            return origOpen.call(this, method, url, ...rest);
+                        };
+                        return xhr;
+                    };
+                    win._xhrPatched = true;
+                }
+                
+                // Disable locks
+                try {
+                    const ac = win.AscCommon;
+                    if (ac?.g_oCollaborativeEditing) {
+                        const ce = ac.g_oCollaborativeEditing;
+                        ce.m_bFast = true;
+                        ce.m_bSingleUser = true;
+                        ce.Is_Fast = () => true;
+                        ce.Is_SingleUser = () => true;
+                    }
+                } catch (e) {}
+                
+                console.log('[Iframe] Setup complete');
+            }
+            
+            // Start after a longer delay to let iframe fully initialize
+            setTimeout(trySetup, 2000);
+        }
+        
+        // ============================================
+        // DOWNLOAD
+        // ============================================
+        function downloadAs(format) {
+            if (!editor) { showToast('No document', 'error'); return; }
+            
+            // Get filename from input
+            const filenameInput = document.getElementById('download-filename');
+            if (filenameInput && filenameInput.value) {
+                currentFileName = filenameInput.value;
+            }
+            
+            // For PDF, use our custom PDF generation
+            if (format === 'pdf') {
+                downloadAsPdf();
                 return;
             }
             
-            const filename = document.getElementById('filename').value || 'Untitled';
-            console.log('[SaveAsFormat] ▶ Starting saveAsFormat with format:', format);
-            updateStatus(`Downloading ${filename}.${format}...`);
-            
-            // Mark download in progress and store desired filename
             window._downloadInProgress = true;
-            window._downloadStartTime = Date.now();
-            window._pendingDownloadFilename = `${filename}.${format}`;
-            
             try {
-                editor.downloadAs(`${filename}.${format}`);
+                editor.downloadAs(format);
                 pollForDownload();
-            } catch (err) {
-                console.error('[Download] SDK downloadAs failed:', err);
+            } catch (e) {
+                showToast('Download failed', 'error');
+                window._downloadInProgress = false;
+            }
+        }
+
+        async function downloadAsPdf() {
+            // Use OnlyOffice's print function which generates pdfbin and calls APP.printPdf
+            showToast('Generating PDF...');
+            try {
+                // Debug: list all iframes
+                const allIframes = document.querySelectorAll('iframe');
+                console.log('[DownloadPDF] All iframes in document:', allIframes.length);
+                allIframes.forEach((f, i) => console.log(`  [${i}] id="${f.id}" name="${f.name}" class="${f.className}"`));
+                
+                // Try multiple iframe selectors
+                let iframe = document.querySelector('#editor iframe');
+                if (!iframe) iframe = document.querySelector('iframe[name="frameEditor"]');
+                if (!iframe) iframe = document.querySelector('iframe');
+                
+                console.log('[DownloadPDF] Selected iframe:', !!iframe, iframe?.name || 'no name');
+                
+                if (iframe && iframe.contentWindow) {
+                    const win = iframe.contentWindow;
+                    console.log('[DownloadPDF] contentWindow accessible');
+                    
+                    // Method 1: Click the print button in the toolbar (most reliable)
+                    try {
+                        const printBtn = win.document.querySelector('#id-toolbar-btn-print');
+                        console.log('[DownloadPDF] Print button found:', !!printBtn);
+                        if (printBtn) {
+                            printBtn.click();
+                            return;
+                        }
+                    } catch (e) {
+                        console.log('[DownloadPDF] Button click failed:', e.message);
+                    }
+                    
+                    // Method 2: Try the internal editor API
+                    try {
+                        const api = win.Asc?.editor || win.editor || win.editorCell;
+                        console.log('[DownloadPDF] API found:', !!api);
+                        if (api && typeof api.asc_Print === 'function') {
+                            api.asc_Print();
+                            return;
+                        }
+                    } catch (e) {
+                        console.log('[DownloadPDF] API call failed:', e.message);
+                    }
+                    
+                    // Method 3: Simulate Ctrl+P keyboard shortcut
+                    try {
+                        console.log('[DownloadPDF] Trying Ctrl+P simulation');
+                        const event = new win.KeyboardEvent('keydown', {
+                            key: 'p',
+                            code: 'KeyP',
+                            keyCode: 80,
+                            which: 80,
+                            ctrlKey: true,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        win.document.body.dispatchEvent(event);
+                        return;
+                    } catch (e) {
+                        console.log('[DownloadPDF] Keyboard simulation failed:', e.message);
+                    }
+                }
+            } catch (e) {
+                console.error('[DownloadPDF] Error:', e);
+            }
+            
+            // Final fallback: just tell user to use Ctrl+P
+            showToast('Press Ctrl+P to print/save as PDF', 'error');
+        }
+        
+        async function pollForDownload() {
+            let attempts = 0;
+            const maxAttempts = 20; // 10 seconds max
+            
+            while (attempts < maxAttempts && window._downloadInProgress) {
+                attempts++;
+                await new Promise(r => setTimeout(r, 500));
+                try {
+                    const res = await fetch('/api/latest-download');
+                    const data = await res.json();
+                    if (data.ready && data.url) {
+                        await triggerFileDownload(data.url);
+                        return;
+                    }
+                } catch (e) {}
+            }
+            
+            // Timeout - stop polling
+            if (window._downloadInProgress) {
+                window._downloadInProgress = false;
+                showToast('Download timeout - try again', 'error');
+            }
+        }
+        
+        async function triggerFileDownload(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const blob = await response.blob();
+                
+                // Get extension from URL, use currentFileName for the base name
+                const urlFileName = url.split('/').pop() || 'download';
+                const ext = urlFileName.includes('.') ? '.' + urlFileName.split('.').pop() : '';
+                const fileName = currentFileName + ext;
+                
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                showToast('Downloaded: ' + fileName);
+                window._downloadInProgress = false;
+            } catch (e) {
+                showToast('Download failed', 'error');
                 window._downloadInProgress = false;
             }
         }
         
-        // Poll the server for completed downloads
-        async function pollForDownload() {
-            let attempts = 0;
-            const maxAttempts = 30; // 15 seconds max
+        // ============================================
+        // URL PARAMS & INIT
+        // ============================================
+        function handleUrlParams() {
+            const params = new URLSearchParams(window.location.search);
             
-            const poll = async () => {
-                try {
-                    const response = await fetch('/api/latest-download');
-                    const data = await response.json();
-                    
-                    if (data.url) {
-                        console.log('[Poll] Download ready:', data.url);
-                        const success = await triggerFileDownload(data.url);
-                        // triggerFileDownload handles the state management now
-                        return;
-                    }
-                    
-                    attempts++;
-                    if (attempts < maxAttempts) {
-                        setTimeout(poll, 500);
-                    } else {
-                        updateStatus('Download timed out');
-                        // Keep suppression active briefly even on timeout
-                        setTimeout(() => {
-                            window._downloadInProgress = false;
-                        }, 3000);
-                    }
-                } catch (err) {
-                    console.error('[Poll] Error:', err);
-                    // Keep suppression active briefly
-                    setTimeout(() => {
-                        window._downloadInProgress = false;
-                    }, 3000);
-                }
-            };
+            const newType = params.get('new');
+            if (newType) {
+                const type = TYPE_MAP[newType.toLowerCase()] || newType.toLowerCase();
+                if (['word', 'cell', 'slide'].includes(type)) { createDocument(type); return; }
+            }
             
-            // Start polling after a short delay to let server process
-            setTimeout(poll, 500);
+            const filePath = params.get('file') || params.get('f');
+            if (filePath) { openFromUrl(filePath); return; }
+            
+            // Default: create word document
+            createDocument('word');
         }
         
-        // Legacy download function - kept for reference but not used
-        async function downloadDocumentDirect() {
-            if (!editor) {
-                alert('Please create or open a document first');
-                return;
-            }
-
-            const filename = document.getElementById('filename').value || 'Untitled';
-            const extMap = { word: 'docx', cell: 'xlsx', slide: 'pptx' };
-            const ext = extMap[currentType] || 'docx';
-
-            updateStatus(`Downloading ${filename}.${ext}...`);
-            
-            // Get the current document content from the template + changes
-            // For CryptPad patched version, the document content is in internal format
-            const template = EmptyDocTemplates[currentType];
-            if (!template) {
-                alert('Cannot export: no template available');
-                return;
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            if (e.target.files[0]) openFile(e.target.files[0]);
+            this.value = '';
+        });
+        
+        // ============================================
+        // APP.printPdf - Required for OnlyOffice print button
+        // Sends document to server for PDF conversion via x2t
+        // ============================================
+        window.APP = window.APP || {};
+        
+        // Helper: Get current document content (binary format)
+        async function getDocumentBinary() {
+            // Method 1: Check if mock server gave us the binary
+            if (window.currentDocumentBinary) {
+                console.log('[GetBinary] Using cached currentDocumentBinary');
+                return window.currentDocumentBinary;
             }
             
+            // Method 2: Try to get from editor API (asc_nativeGetFile)
             try {
-                // Use our custom conversion endpoint
-                updateStatus(`Converting to ${ext}...`);
-                
-                // Build the document content - template + changes
-                const docContent = template;  // Full internal format doc
-                
-                // Create FormData with the document
-                const formData = new FormData();
-                const blob = new Blob([docContent], { type: 'text/plain' });
-                formData.append('file', blob, `${filename}.bin`);
-                formData.append('outputFormat', ext);
-                formData.append('title', `${filename}.${ext}`);
-                
-                const response = await fetch('/api/convert', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Conversion failed: ${response.statusText}`);
+                const iframe = document.querySelector('#editor iframe');
+                if (iframe && iframe.contentWindow) {
+                    const api = iframe.contentWindow.Asc?.editor;
+                    if (api) {
+                        // Try asc_nativeGetFile (returns binary document)
+                        if (api.asc_nativeGetFile) {
+                            const nativeFile = api.asc_nativeGetFile();
+                            if (nativeFile && nativeFile.byteLength > 0) {
+                                console.log('[GetBinary] Got from asc_nativeGetFile:', nativeFile.byteLength, 'bytes');
+                                return nativeFile;
+                            }
+                        }
+                        // Try asc_getBinContent (CryptPad's approach)
+                        if (api.asc_getBinContent) {
+                            const binContent = api.asc_getBinContent();
+                            if (binContent) {
+                                console.log('[GetBinary] Got from asc_getBinContent');
+                                return binContent;
+                            }
+                        }
+                    }
                 }
-                
-                // Download the converted file
-                const resultBlob = await response.blob();
-                const url = URL.createObjectURL(resultBlob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${filename}.${ext}`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                updateStatus(`Downloaded: ${filename}.${ext}`);
-                console.log('[Download] Successfully exported to', ext);
-                
-            } catch (err) {
-                console.error('[Download] Conversion failed:', err);
-                
-                // Fallback: Download the internal format
-                updateStatus('Conversion failed, downloading internal format...');
-                downloadInternalFormat(filename);
+            } catch (e) {
+                console.log('[GetBinary] Editor API error:', e.message);
             }
+            
+            // Method 3: Use the original document blob content
+            if (currentDocBlob) {
+                try {
+                    const arrayBuffer = await currentDocBlob.arrayBuffer();
+                    const text = new TextDecoder().decode(arrayBuffer);
+                    console.log('[GetBinary] Using original blob, length:', text.length);
+                    return new TextEncoder().encode(text);
+                } catch (e) {
+                    console.log('[GetBinary] Blob read error:', e.message);
+                }
+            }
+            
+            return null;
         }
         
-        // Download document in internal format (can be converted later with x2t)
-        function downloadInternalFormat(filename) {
-            const template = EmptyDocTemplates[currentType];
-            if (!template) {
-                alert('Cannot export: no template available');
+        window.APP.printPdf = async function(dataContainer, callback) {
+            console.log('[PrintPdf] Called by OnlyOffice');
+            
+            const pdfBinData = dataContainer?.data;
+            if (!pdfBinData) {
+                console.error('[PrintPdf] No PDF data in container');
+                callback && callback({ status: 'err' });
                 return;
             }
             
-            // Combine template with changes to create the full document
-            // The format is: TYPE;version;size;base64data followed by changes
-            let exportData = template;
+            console.log('[PrintPdf] pdfbin size:', pdfBinData.byteLength || pdfBinData.length, 'bytes');
             
-            if (documentChanges && documentChanges.length > 0) {
-                // Append changes in the format expected by x2t
-                // Each change is appended as a separate entry
-                console.log('[Download] Including', documentChanges.length, 'changes');
-                exportData += '\n' + JSON.stringify({ changes: documentChanges });
+            // Get the document binary - this is the internal format that x2t can convert
+            const docBin = await getDocumentBinary();
+            console.log('[PrintPdf] docbin available:', !!docBin, docBin ? (docBin.byteLength || docBin.length) + ' bytes' : 'N/A');
+            
+            // Build form data
+            const formData = new FormData();
+            if (docBin) {
+                formData.append('docbin', new Blob([docBin]), 'document.bin');
             }
+            formData.append('pdfbin', new Blob([pdfBinData]), 'pdf.bin');
+            formData.append('filename', 'document');
             
-            // Create blob and download
-            const blob = new Blob([exportData], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
+            showToast('Generating PDF...');
             
-            const a = document.createElement('a');
-            a.href = url;
-            
-            // Use internal format extension
-            const internalExt = currentType === 'word' ? 'bin' : 
-                               currentType === 'cell' ? 'bin' : 'bin';
-            a.download = `${filename}.${internalExt}`;
-            
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            updateStatus(`Downloaded ${filename}.${internalExt} (internal format)`);
-            console.log('[Download] Exported internal format');
-        }
-
-        // Initialize
-        updateStatus('Ready • Click "New Document", "New Spreadsheet", or "New Presentation" to start');
-        console.log('[Init] OnlyOffice Serverless Editor loaded');
-        console.log('[Init] DocsAPI available:', typeof DocsAPI !== 'undefined');
+            fetch('/api/print-pdf', { method: 'POST', body: formData })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(text => {
+                            throw new Error(text || 'Server error: ' + response.status);
+                        });
+                    }
+                    return response.blob();
+                })
+                .then(pdfBlob => {
+                    showToast('PDF ready!', 'success');
+                    const url = URL.createObjectURL(pdfBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = currentFileName + '.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    callback && callback({ status: 'ok' });
+                })
+                .catch(err => {
+                    console.error('[PrintPdf] Error:', err);
+                    showToast('PDF failed: ' + err.message, 'error');
+                    
+                    // Fallback: use browser print dialog
+                    console.log('[PrintPdf] Falling back to browser print...');
+                    try {
+                        const iframe = document.querySelector('#editor iframe');
+                        if (iframe && iframe.contentWindow) {
+                            iframe.contentWindow.focus();
+                            iframe.contentWindow.print();
+                        }
+                    } catch (e) {}
+                    
+                    callback && callback({ status: 'err' });
+                });
+        };
+        
+        // Init
+        loadTemplates();
+        setTimeout(handleUrlParams, 300);
     </script>
-
-    <style>iframe {width: 100%; height: 100%;}</style>
 </body>
 </html>

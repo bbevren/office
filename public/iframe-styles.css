@@ -48,6 +48,10 @@
 
 /* ========== DIALOGS/MODALS ========== */
 
+/* Hide File Menu Panel to prevent access to broken Download options */
+#file-menu-panel { display: none !important; }
+[data-layout-name="toolbar-file"] { display: none !important; }
+
 /* Modal dialog styling */
 /*
 .asc-window { border-radius: 8px !important; }

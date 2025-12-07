@@ -24,7 +24,8 @@ who want to understand, modify, or integrate this OnlyOffice editor system.
 12. INTEGRATING WITH YOUR FILE SYSTEM
 13. API ENDPOINTS
 14. CUSTOMIZATION & EXTENSION
-15. TROUBLESHOOTING
+15. USER INTERFACE (FLOATING TOOLBAR)
+16. TROUBLESHOOTING
 
 ================================================================================
                            1. SYSTEM OVERVIEW
@@ -40,6 +41,9 @@ KEY FEATURES:
 - Export to PDF (Word, Excel, PowerPoint)
 - Download/export documents in Office formats
 - Handle embedded images
+- Floating toolbar with document-type-aware colors
+- Filename customization in download dialog
+- URL parameters for creating/opening documents
 - No server-side document processing required (except for format conversion)
 - Optional co-editing support (disabled by default)
 
@@ -264,14 +268,30 @@ A. CREATING A NEW DOCUMENT (Manual)
 B. CREATING A NEW DOCUMENT (URL Parameter)
 ------------------------------------------
 
-Users can create a new document by navigating to a URL with filename:
+Users can create a new document by navigating to a URL with parameters.
 
-URL FORMAT:
-  http://localhost:8080/?f=MyDocument.docx
-  http://localhost:8080/?f=Budget.xlsx
-  http://localhost:8080/?f=Presentation.pptx
+URL PARAMETERS:
+---------------
 
-HOW IT WORKS:
+  f=<filename>      Create new document with specified filename and type
+  url=<file_url>    Open existing file from URL (must be accessible)
+  coedit=true       Enable collaborative editing mode
+
+EXAMPLES:
+
+Creating new documents:
+  http://localhost:8080/?f=MyDocument.docx      → New Word document
+  http://localhost:8080/?f=Budget.xlsx          → New Excel spreadsheet
+  http://localhost:8080/?f=Presentation.pptx    → New PowerPoint presentation
+
+Opening files from URL:
+  http://localhost:8080/?url=https://example.com/report.docx
+  http://localhost:8080/?url=/files/budget.xlsx
+
+Combined parameters:
+  http://localhost:8080/?f=Document.docx&coedit=true
+
+HOW 'f' PARAMETER WORKS:
 
 1. On page load, JavaScript checks for 'f' URL parameter:
    ```javascript
@@ -295,26 +315,19 @@ HOW IT WORKS:
    const docType = typeMap[ext];
    ```
 
-4. Set filename in input field and create new document:
-   ```javascript
-   document.getElementById('filename').value = filename;
-   createDocument(docType);  // Creates empty document of that type
-   ```
+4. Create new document with that type and set filename
+
+HOW 'url' PARAMETER WORKS:
+
+1. JavaScript checks for 'url' parameter
+2. Fetches the file from the specified URL
+3. Sends to server for conversion via /api/open
+4. Opens the converted document in the editor
 
 SUPPORTED EXTENSIONS FOR NEW DOCUMENTS:
-- Word: docx, doc, odt, rtf (creates Word editor)
+- Word: docx, doc, odt, rtf, txt, html, md (creates Word editor)
 - Excel: xlsx, xls, ods, csv (creates Excel editor)
 - PowerPoint: pptx, ppt, odp (creates PowerPoint editor)
-
-EXAMPLE URLS:
-- /?f=Report.docx        → Opens Word editor, filename "Report"
-- /?f=Q4-Budget.xlsx     → Opens Excel editor, filename "Q4-Budget"
-- /?f=Sales-Pitch.pptx   → Opens PowerPoint editor, filename "Sales-Pitch"
-- /?f=Notes.doc          → Opens Word editor, filename "Notes"
-- /?f=Data.csv           → Opens Excel editor, filename "Data"
-
-COMBINING WITH CO-EDIT:
-- /?f=Document.docx&coedit=true  → New Word doc with co-editing enabled
 
 C. OPENING AN EXISTING FILE
 ---------------------------
@@ -1381,6 +1394,108 @@ GET  /api/latest-download           Poll for download completion
 GET  /downloads/{id}/{filename}     Download converted file
 
 ================================================================================
+                 15. USER INTERFACE (FLOATING TOOLBAR)
+================================================================================
+
+The editor features a minimal floating toolbar in the bottom-right corner.
+This provides quick access to common actions without cluttering the editor.
+
+FLOATING TOOLBAR BUTTONS:
+-------------------------
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                                                                            │
+│                                             ┌─────┐  ┌─────┐               │
+│                                             │ NEW │  │ DL  │               │
+│                                             └─────┘  └─────┘               │
+└────────────────────────────────────────────────────────────────────────────┘
+
+1. NEW BUTTON (File+ icon)
+   - Hover reveals dropdown menu
+   - Options:
+     • Document     → Creates new Word document
+     • Spreadsheet  → Creates new Excel spreadsheet
+     • Presentation → Creates new PowerPoint presentation
+     • Open file... → Opens file picker for existing documents
+
+2. DOWNLOAD BUTTON (Arrow down icon)
+   - Hover reveals dropdown menu with filename input
+   - Options vary by document type:
+   
+   Word documents:
+     • Word (.docx)
+     • PDF (.pdf)
+     • ODT (.odt)
+     • RTF (.rtf)
+     • Text (.txt)
+   
+   Excel spreadsheets:
+     • Excel (.xlsx)
+     • PDF (.pdf)
+     • ODS (.ods)
+     • CSV (.csv)
+   
+   PowerPoint presentations:
+     • PowerPoint (.pptx)
+     • PDF (.pdf)
+     • ODP (.odp)
+
+FILENAME INPUT:
+---------------
+The download dropdown includes a filename input field at the top.
+- Pre-filled with current document name
+- Edit before downloading to change the output filename
+- Filename is preserved across downloads
+
+DOCUMENT-TYPE-AWARE COLORS:
+---------------------------
+The floating toolbar changes color based on document type to match
+OnlyOffice's toolbar colors:
+
+  Word documents:        #446995 (Blue)
+  Excel spreadsheets:    #3A8056 (Green)
+  PowerPoint:            #B75B44 (Orange/Red)
+
+Colors update automatically when:
+- Creating a new document
+- Opening an existing document
+- Switching document types
+
+CSS CUSTOMIZATION:
+------------------
+The toolbar colors can be customized in the <style> section of index.html:
+
+```css
+/* Document type colors matching OnlyOffice toolbar */
+.fab-container[data-doc-type="word"] .fab { background: #446995; }
+.fab-container[data-doc-type="cell"] .fab { background: #3A8056; }
+.fab-container[data-doc-type="slide"] .fab { background: #B75B44; }
+```
+
+HIDING ONLYOFFICE'S FILE MENU:
+------------------------------
+The OnlyOffice editor's built-in File menu is hidden via iframe-styles.css
+to prevent conflicts with our download system:
+
+```css
+/* In public/iframe-styles.css */
+#file-menu-panel { display: none !important; }
+[data-layout-name="toolbar-file"] { display: none !important; }
+```
+
+Note: The iframe style injection happens after the editor loads.
+If you need the File menu, remove these rules from iframe-styles.css.
+
+PDF DOWNLOAD:
+-------------
+PDF download uses a special mechanism:
+1. Clicks the internal OnlyOffice print button (#id-toolbar-btn-print)
+2. OnlyOffice generates pdfbin (PDF rendering data) and docbin (document content)
+3. Both are sent to /api/print-pdf
+4. Server converts to actual PDF using x2t-wasm
+5. PDF is downloaded with the custom filename
+
+================================================================================
                            CHANGE HISTORY
 ================================================================================
 
@@ -1398,36 +1513,52 @@ CHANGES FROM INITIAL COMMIT:
    - Implemented APP.printPdf hook
    - Added /api/print-pdf server endpoint
    - PDF export works for Word, Excel, and PowerPoint
+   - Uses both pdfbin and docbin for proper conversion
 
-3. PRESENTATION THEMES:
+3. FLOATING TOOLBAR UI:
+   - Replaced emoji icons with white SVG icons
+   - Document-type-aware colors (blue/green/orange)
+   - Removed redundant Save button
+   - Added filename input in download dropdown
+   - Custom filename preserved in downloads
+
+4. PRESENTATION THEMES:
    - Added APP.changeTheme hook
    - Allows changing design themes without errors
 
-4. ADDITIONAL FILE FORMATS:
+5. ADDITIONAL FILE FORMATS:
    - Added support for: doc, xls, ppt (legacy Office)
    - Added support for: odt, ods, odp (OpenDocument)
    - Added support for: rtf, txt, html, htm, md
    - Added support for: csv (spreadsheet data)
    - Added PDF opening (converts to editable Word)
+   - Fixed RTF format code (68) in server
 
-5. IMAGE HANDLING:
+6. IMAGE HANDLING:
    - Fixed APP.AddImage for file picker
    - Fixed APP.AddImageUrl for URL-based images
    - Fixed APP.UploadImageFiles for paste/drag
    - Added CORS proxy via /api/fetch-image
 
-6. URL PARAMETER FOR NEW DOCUMENTS:
-   - Added ?f=filename.ext parameter to create new documents
+7. URL PARAMETERS:
+   - Added ?f=filename.ext to create new documents with custom name
+   - Added ?url=<url> to open files from remote URLs
    - Supports all document types: docx, xlsx, pptx, doc, xls, ppt, etc.
    - Auto-detects document type from extension
    - Sets filename automatically from URL
    - Can combine with ?coedit=true
 
+8. IFRAME STYLE INJECTION:
+   - Added iframe-styles.css for customizing editor appearance
+   - Hidden File menu panel to use custom download system
+   - Style injection with retry logic for reliability
+
 FILES MODIFIED:
 ---------------
-- public/index.html       Main application (extensive changes)
-- server.js               Added PDF conversion, file format support
-- DEVELOPER_GUIDE.txt     This documentation
+- public/index.html           Main application (UI, mock server, download logic)
+- public/iframe-styles.css    Injected styles for OnlyOffice iframe
+- server.js                   Added PDF conversion, format codes, polling suppression
+- DEVELOPER_GUIDE.txt         This documentation
 
 ONLYOFFICE SDK FILES (NOT MODIFIED - CRYPTPAD PATCH):
 ------------------------------------------------------
