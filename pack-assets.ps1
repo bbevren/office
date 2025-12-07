@@ -1,7 +1,7 @@
 # pack-assets.ps1
 # Script to compress OnlyOffice assets for version control
 # Run this before committing if you've made changes to public/onlyoffice/
-
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 param(
     [switch]$Unpack,
     [switch]$Pack,

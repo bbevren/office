@@ -2,7 +2,7 @@
 # Re-creates zip files from the extracted folders for Git LFS
 # Run this BEFORE committing when you've made changes to OnlyOffice files
 # Run with -Restore after reverting a commit to extract from zip
-
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 param(
     [switch]$Restore  # Use -Restore to extract zip back to folder (after git revert)
 )
