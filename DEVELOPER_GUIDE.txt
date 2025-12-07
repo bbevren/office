@@ -16,6 +16,7 @@ who want to understand, modify, or integrate this OnlyOffice editor system.
 4. HOW IT WORKS - DETAILED FLOW
 5. MOCK SERVER IMPLEMENTATION
 6. CO-EDITING & LOCK MECHANISM
+   6B. CUSTOMIZING USERS & ENABLING CO-EDITING
 7. PDF CONVERSION & EXPORT
 8. DOCUMENT CONVERSION (x2t-wasm)
 9. IMAGE HANDLING
@@ -573,15 +574,162 @@ patches the iframe's OnlyOffice instance for extra safety:
 - Forces Is_Fast() to return true
 - Patches IsSelectionLocked to return false
 - Makes Add_CheckLock a no-op
+- Clears existing lock arrays (m_aLocks)
 
-ENABLING CO-EDITING FOR FUTURE USE:
------------------------------------
+The function uses internal retries (tryPatch) at multiple intervals
+to ensure patches are applied after the editor fully loads.
 
-To enable full co-editing (for a custom collaboration server):
-1. Add ?coedit=true to the URL
-2. The full connectMockServer will be used
-3. Replace mock server with your WebSocket implementation
-4. Route messages through your collaboration server
+================================================================================
+               6B. CUSTOMIZING USERS & ENABLING CO-EDITING
+================================================================================
+
+CHANGING THE USER NAME/ID:
+--------------------------
+
+By default, the editor uses an anonymous user. To customize:
+
+1. Find the GLOBAL_USER_ID variable near the top of index.html:
+
+   const GLOBAL_USER_ID = 'user_' + Math.random().toString(36).substr(2, 9);
+
+2. Replace with your own user ID (e.g., from your authentication system):
+
+   const GLOBAL_USER_ID = 'user_12345';  // Your user's unique ID
+
+3. Find the editor config and change the user name:
+
+   user: { id: GLOBAL_USER_ID, name: 'User' },
+   
+   Change to:
+   
+   user: { id: GLOBAL_USER_ID, name: 'John Doe' },  // Your user's display name
+
+EXAMPLE - User from URL parameter:
+----------------------------------
+
+```javascript
+// Get user info from URL: ?userId=123&userName=John
+const urlParams = new URLSearchParams(window.location.search);
+const GLOBAL_USER_ID = urlParams.get('userId') || 'guest_' + Date.now();
+const USER_NAME = urlParams.get('userName') || 'Guest';
+
+// Then in editor config:
+user: { id: GLOBAL_USER_ID, name: USER_NAME },
+```
+
+ENABLING COLLABORATIVE EDITING (Multiple Users):
+------------------------------------------------
+
+The editor is configured for single-user mode by default (no lock indicators,
+no coordination). To enable real collaborative editing:
+
+1. MODIFY THE MOCK SERVER to handle multiple users:
+
+   In connectMockServer(), change getParticipants to return all users:
+   
+   ```javascript
+   getParticipants: () => ({
+       list: [
+           { id: 'user1', idOriginal: 'user1', username: 'Alice', indexUser: 0, view: false, connectionId: 'user1' },
+           { id: 'user2', idOriginal: 'user2', username: 'Bob', indexUser: 1, view: false, connectionId: 'user2' }
+       ],
+       index: 0  // Index of current user in list
+   }),
+   ```
+
+2. REMOVE/DISABLE the disableLockMechanism() function:
+   
+   Comment out or delete these lines:
+   ```javascript
+   // setTimeout(disableLockMechanism, 100);
+   // setTimeout(disableLockMechanism, 500);
+   // ... etc
+   ```
+
+3. REMOVE APP.isFast forcing:
+   
+   Change:
+   ```javascript
+   window.APP.onFastChange = function(isFast) {
+       window.APP.isFast = true;  // Always fast
+   };
+   ```
+   
+   To:
+   ```javascript
+   window.APP.onFastChange = function(isFast) {
+       window.APP.isFast = isFast;  // Allow switching
+   };
+   window.APP.isFast = false;  // Start in strict mode for co-editing
+   ```
+
+4. IMPLEMENT REAL-TIME SYNC via WebSocket:
+
+   Replace the mock server's onMessage handler to forward messages to your
+   collaboration server, and broadcast incoming changes to the editor:
+   
+   ```javascript
+   // Connect to your collaboration server
+   const ws = new WebSocket('wss://your-server.com/collab');
+   
+   const mockServer = {
+       onMessage: function(msg) {
+           // Forward editor messages to server
+           ws.send(JSON.stringify(msg));
+       },
+       // ... other callbacks
+   };
+   
+   // Receive messages from server and send to editor
+   ws.onmessage = function(event) {
+       const msg = JSON.parse(event.data);
+       sendToEditor(msg);
+   };
+   ```
+
+5. HANDLE LOCK MESSAGES properly:
+
+   For co-editing, locks should be coordinated through your server:
+   
+   ```javascript
+   // When editor requests a lock
+   if (msg.type === 'getLock') {
+       // Forward to server, server decides if lock is granted
+       ws.send(JSON.stringify({ type: 'requestLock', blocks: msg.block, userId: GLOBAL_USER_ID }));
+   }
+   
+   // When server grants/denies lock
+   ws.onmessage = function(event) {
+       const msg = JSON.parse(event.data);
+       if (msg.type === 'lockResponse') {
+           sendToEditor({ type: 'getLock', locks: msg.locks });
+       }
+   };
+   ```
+
+CO-EDITING PROTOCOL MESSAGES:
+-----------------------------
+
+| Message Type    | Direction      | Purpose                              |
+|-----------------|----------------|--------------------------------------|
+| getLock         | Editor→Server  | Request to lock a paragraph/cell     |
+| getLock         | Server→Editor  | Response with granted locks          |
+| releaseLock     | Editor→Server  | Release a held lock                  |
+| saveChanges     | Editor→Server  | Send document changes                |
+| saveChanges     | Server→Editor  | Acknowledge with changesIndex        |
+| cursor          | Both           | Cursor position updates              |
+| isSaveLock      | Editor→Server  | Check if save is in progress         |
+| saveLock        | Server→Editor  | Response to isSaveLock               |
+
+TESTING CO-EDITING LOCALLY:
+---------------------------
+
+For development testing with multiple users:
+
+1. Open the editor in two different browsers (or incognito windows)
+2. Use different userId parameters: ?userId=user1 and ?userId=user2
+3. Both should connect to your WebSocket server
+4. Changes in one window should appear in the other
 
 ================================================================================
                      7. PDF CONVERSION & EXPORT

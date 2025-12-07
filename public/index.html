@@ -367,7 +367,7 @@
                 editorConfig: {
                     mode: 'edit',
                     lang: 'en',
-                    user: { id: GLOBAL_USER_ID, name: 'Guest' },
+                    user: { id: GLOBAL_USER_ID, name: 'User' },
                     coEditing: { mode: 'fast', change: false },
                     customization: {
                         autosave: false, forcesave: false, chat: false, comments: false,
@@ -377,7 +377,14 @@
                 },
                 events: {
                     onAppReady: () => console.log('[Editor] Ready'),
-                    onDocumentReady: () => { console.log('[Editor] Document ready'); setupIframe(); },
+                    onDocumentReady: () => { 
+                        console.log('[Editor] Document ready'); 
+                        setupIframe(); 
+                        // Disable lock mechanism after document loads
+                        setTimeout(disableLockMechanism, 100);
+                        setTimeout(disableLockMechanism, 500);
+                        setTimeout(disableLockMechanism, 1500);
+                    },
                     onError: (e) => { if (!window._downloadInProgress) console.error('[Editor] Error:', e); },
                     onDownloadAs: (e) => {
                         console.log('[Editor] onDownloadAs:', e);
@@ -397,7 +404,9 @@
         }
         
         // ============================================
-        // MOCK SERVER
+        // MOCK SERVER - Fast single-user mode
+        // Handles OnlyOffice collaborative protocol in single-user mode
+        // Key: All locks are granted to GLOBAL_USER_ID so editor sees them as "mine"
         // ============================================
         function connectMockServer(editorInstance) {
             window.APP = window.APP || {};
@@ -405,38 +414,92 @@
             
             const mockServer = {
                 onMessage: function(msg) {
-                    if (msg.type === 'saveChanges') {
-                        if (msg.changes) documentChanges = documentChanges.concat(msg.changes);
-                        sendToEditor?.({ type: 'saveChanges', changesIndex: documentChanges.length, locks: [], excelAdditionalInfo: null });
-                    } else if (msg.type === 'unSaveLock') {
-                        sendToEditor?.({ type: 'unSaveLock', index: -1 });
-                    } else if (msg.type === 'getLock') {
+                    // Handle getLock - CRITICAL for preventing lock UI
+                    // By returning locks owned by GLOBAL_USER_ID, editor thinks "I own this"
+                    if (msg.type === 'getLock') {
                         const locks = {};
                         (msg.block || []).forEach(block => {
                             const key = typeof block === 'object' ? JSON.stringify(block) : String(block);
-                            locks[key] = { visitable: true, block, user: GLOBAL_USER_ID, time: Date.now(), changes: null };
+                            locks[key] = { 
+                                visitable: true, 
+                                block: block, 
+                                user: GLOBAL_USER_ID,  // Same as editor config user
+                                time: Date.now(), 
+                                changes: null,
+                                sessionId: GLOBAL_USER_ID
+                            };
                         });
-                        sendToEditor?.({ type: 'getLock', locks });
-                    } else if (msg.type === 'isSaveLock') {
+                        sendToEditor?.({ type: 'getLock', locks: locks });
+                        return;
+                    }
+                    
+                    // Handle releaseLock - acknowledge release
+                    if (msg.type === 'releaseLock') {
+                        sendToEditor?.({ type: 'releaseLock', locks: {} });
+                        return;
+                    }
+                    
+                    // Handle saveChanges
+                    if (msg.type === 'saveChanges') {
+                        if (msg.changes) documentChanges = documentChanges.concat(msg.changes);
+                        sendToEditor?.({ type: 'saveChanges', changesIndex: documentChanges.length, locks: [], excelAdditionalInfo: null });
+                        return;
+                    }
+                    
+                    // Handle unSaveLock
+                    if (msg.type === 'unSaveLock') {
+                        sendToEditor?.({ type: 'unSaveLock', index: -1 });
+                        return;
+                    }
+                    
+                    // Handle isSaveLock - always say NOT locked
+                    if (msg.type === 'isSaveLock') {
                         sendToEditor?.({ type: 'saveLock', saveLock: false });
-                    } else if (msg.type === 'openDocument' && msg.message?.c === 'imgurls') {
+                        return;
+                    }
+                    
+                    // Handle image URL requests
+                    if (msg.type === 'openDocument' && msg.message?.c === 'imgurls') {
                         sendToEditor?.({ type: 'documentOpen', data: { imgurls: {} } });
+                        return;
                     }
                 },
-                getParticipants: () => ({ list: [{ id: GLOBAL_USER_ID, idOriginal: GLOBAL_USER_ID, username: 'Guest', indexUser: 0, view: false, connectionId: GLOBAL_USER_ID }], index: 0 }),
-                onAuth: () => {},
+                
+                // Single-user mode: return EMPTY participant list
+                // This tells the editor there's no one else to coordinate/lock with
+                getParticipants: () => ({ list: [], index: -1 }),
+                
+                // CRITICAL: onAuth is called after connection - force fast mode here
+                onAuth: function() {
+                    console.log('[MockServer] Auth completed - forcing fast mode');
+                    // Force fast mode to prevent lock visualization
+                    window.APP.isFast = true;
+                    if (typeof window.APP.onFastChange === 'function') {
+                        window.APP.onFastChange(true);
+                    }
+                    // Also try to disable locks immediately
+                    setTimeout(disableLockMechanism, 50);
+                },
+                
                 getImageURL: (name) => {
                     if (name.startsWith('blob:') || name.startsWith('data:') || name.startsWith('http')) return Promise.resolve(name);
                     if (currentDocumentImages[name]) return Promise.resolve(currentDocumentImages[name]);
                     return Promise.resolve(`/onlyoffice/v8/web-apps/apps/documenteditor/main/${name}`);
                 },
+                
                 getInitialChanges: () => [],
-                onDocumentBinaryReady: (binary) => { window.currentDocumentBinary = binary; }
+                
+                onDocumentBinaryReady: (binary) => { 
+                    window.currentDocumentBinary = binary; 
+                }
             };
             
             try {
                 sendToEditor = editorInstance.connectMockServer(mockServer);
-            } catch (e) { console.error('[MockServer] Error:', e); }
+                console.log('[MockServer] Connected successfully');
+            } catch (e) { 
+                console.error('[MockServer] Error:', e); 
+            }
         }
         
         // ============================================
@@ -529,6 +592,9 @@
                         ce.Is_SingleUser = () => true;
                     }
                 } catch (e) {}
+                
+                // Also call full disableLockMechanism on the iframe window
+                disableLockMechanism(win);
                 
                 console.log('[Iframe] Setup complete');
             }
@@ -710,10 +776,163 @@
         });
         
         // ============================================
+        // APP OBJECT - Fast mode & Lock mechanism prevention
+        // ============================================
+        window.APP = window.APP || {};
+        
+        // Fast mode control - prevents lock visualization
+        // When Is_Fast() returns true, locks owned by current user are not drawn
+        window.APP.isFast = true;  // Start in fast mode
+        window.APP.onFastChange = function(isFast) {
+            window.APP.isFast = true;  // Always stay in fast mode
+            console.log('[APP] onFastChange called, forcing fast mode');
+        };
+        
+        // Disable lock mechanism in the iframe's OnlyOffice editor
+        // This patches internal objects to prevent lock-based UI (red labels)
+        function disableLockMechanism(iframeWindow) {
+            if (!iframeWindow) {
+                const iframe = document.querySelector('#editor iframe');
+                if (!iframe) return;
+                iframeWindow = iframe.contentWindow;
+            }
+            if (!iframeWindow) return;
+            
+            // Inner function that does the actual patching - called multiple times
+            const tryPatch = () => {
+                try {
+                    const editor = iframeWindow.Asc?.editor;
+                    const ac = iframeWindow.AscCommon;
+                    
+                    if (!editor && !ac) {
+                        return; // Editor not loaded yet, will retry
+                    }
+                    
+                    // === AGGRESSIVE LOCK DISABLE ===
+                    
+                    // 1. Disable lock drawing at the graphics level
+                    if (editor?.WordControl?.m_oDrawingDocument) {
+                        editor.WordControl.m_oDrawingDocument.IsLockObjectsEnable = false;
+                    }
+                    
+                    // 2. Disable co-author marks drawing
+                    if (editor && 'isCoMarksDraw' in editor) {
+                        editor.isCoMarksDraw = false;
+                    }
+                    
+                    // 3. Override the DrawLockParagraph function to do nothing
+                    if (ac?.CGraphics?.prototype) {
+                        ac.CGraphics.prototype.DrawLockParagraph = function() {};
+                        ac.CGraphics.prototype.DrawLockObjectRect = function() {};
+                    }
+                    
+                    // 4. Force collaborative editing into "fast" mode  
+                    if (ac?.CollaborativeEditing) {
+                        const CE = ac.CollaborativeEditing;
+                        if (CE.prototype) {
+                            CE.prototype.Is_Fast = function() { return true; };
+                            CE.prototype.getFast = function() { return true; };
+                            CE.prototype.isLocked = function() { return false; };
+                            CE.prototype.Is_SingleUser = function() { return true; };
+                        }
+                    }
+                    
+                    // 5. Patch the global collaborative editing instance
+                    if (ac?.g_oCollaborativeEditing) {
+                        const gCE = ac.g_oCollaborativeEditing;
+                        gCE.m_bFast = true;
+                        gCE.m_bSingleUser = true;
+                        gCE.Is_Fast = function() { return true; };
+                        gCE.getFast = function() { return true; };
+                        gCE.Is_SingleUser = function() { return true; };
+                        gCE.isLocked = function() { return false; };
+                        gCE.getLockInfo = function() { return null; };
+                        gCE.m_aLocks = [];
+                        gCE.m_aLocksToSend = [];
+                    }
+                    
+                    // 6. Patch editor's collaborativeEditing
+                    if (editor?.collaborativeEditing) {
+                        const eCE = editor.collaborativeEditing;
+                        eCE.m_bFast = true;
+                        eCE.m_bSingleUser = true;
+                        eCE.Is_Fast = function() { return true; };
+                        eCE.getFast = function() { return true; };
+                        eCE.Is_SingleUser = function() { return true; };
+                    }
+                    
+                    // 7. Patch CoAuthoringApi to disable lock checks
+                    if (editor?.CoAuthoringApi) {
+                        editor.CoAuthoringApi.isLocked = function() { return false; };
+                        editor.CoAuthoringApi.getLock = function() { return true; };
+                        editor.CoAuthoringApi.releaseLock = function() {};
+                    }
+                    
+                    // 8. Disable lock checking in document
+                    if (ac?.CDocument?.prototype) {
+                        ac.CDocument.prototype.IsSelectionLocked = function() { return false; };
+                        ac.CDocument.prototype.Document_Is_SelectionLocked = function() { return false; };
+                    }
+                    
+                    // 9. CRITICAL: Disable Add_CheckLock - triggers lock UI
+                    if (ac?.CollaborativeEditing) {
+                        ac.CollaborativeEditing.Add_CheckLock = function() { return false; };
+                    }
+                    if (ac?.g_oCollaborativeEditing) {
+                        ac.g_oCollaborativeEditing.Add_CheckLock = function() { return false; };
+                    }
+                    
+                    // 10. Patch CLock.Check to do nothing
+                    if (ac?.CLock?.prototype) {
+                        ac.CLock.prototype.Check = function() { return false; };
+                        ac.CLock.prototype.Get_Type = function() { return ac.c_oAscLockTypes?.kLockTypeNone || 0; };
+                    }
+                    
+                    // 11. Patch Paragraph lock checking  
+                    if (iframeWindow.AscWord?.Paragraph?.prototype) {
+                        iframeWindow.AscWord.Paragraph.prototype.Document_Is_SelectionLocked = function() { return false; };
+                    }
+                    
+                    // 12. Patch text selection lock indicator (for spreadsheets/presentations too)
+                    if (ac?.CTableId) {
+                        ac.CTableId.prototype.IsSelectionLocked = function() { return false; };
+                    }
+                    
+                    // 13. Kill any existing lock objects
+                    if (ac?.g_oCollaborativeEditing?.m_aLocks) {
+                        ac.g_oCollaborativeEditing.m_aLocks = [];
+                    }
+                    
+                } catch (e) {
+                    // Silently continue - will retry
+                }
+            };
+            
+            // Try immediately and multiple times to catch all loading stages
+            tryPatch();
+            setTimeout(tryPatch, 100);
+            setTimeout(tryPatch, 300);
+            setTimeout(tryPatch, 500);
+            setTimeout(tryPatch, 1000);
+            setTimeout(tryPatch, 2000);
+            setTimeout(tryPatch, 3000);
+            setTimeout(tryPatch, 5000);
+        }
+        
+        // Apply lock patches at page level multiple times
+        setTimeout(disableLockMechanism, 100);
+        setTimeout(disableLockMechanism, 500);
+        setTimeout(disableLockMechanism, 1000);
+        setTimeout(disableLockMechanism, 2000);
+        setTimeout(disableLockMechanism, 3000);
+        setTimeout(disableLockMechanism, 5000);
+        setTimeout(disableLockMechanism, 8000);
+        setTimeout(disableLockMechanism, 10000);
+        
+        // ============================================
         // APP.printPdf - Required for OnlyOffice print button
         // Sends document to server for PDF conversion via x2t
         // ============================================
-        window.APP = window.APP || {};
         
         // Helper: Get current document content (binary format)
         async function getDocumentBinary() {
