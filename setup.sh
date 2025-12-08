@@ -153,6 +153,12 @@ else
     echo "✓ OnlyOffice editors already exist, skipping."
 fi
 
+# Fix folder permissions (important for macOS/Linux)
+echo ""
+echo "Fixing folder permissions..."
+chmod -R 755 public/onlyoffice/ 2>/dev/null || true
+echo "✓ Permissions fixed!"
+
 # Install npm dependencies
 echo ""
 echo "[5/5] Installing npm dependencies..."
